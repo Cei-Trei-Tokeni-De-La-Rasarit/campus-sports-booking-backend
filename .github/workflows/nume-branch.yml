@@ -1,0 +1,22 @@
+# Verifică dacă branch-ul unui pull request respectă convenția KAN-<număr>-<titlu>.
+name: Nume branch
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  nume-branch:
+    name: Nume branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifică numele branch-ului
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          if [[ "$BRANCH" =~ ^KAN-[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            echo "Numele branch-ului este corect: $BRANCH"
+          else
+            echo "::error::Branch-ul '$BRANCH' nu respectă convenția KAN-<număr>-<titlu> (ex. KAN-79-crud-facilitate-backend)."
+            exit 1
+          fi
