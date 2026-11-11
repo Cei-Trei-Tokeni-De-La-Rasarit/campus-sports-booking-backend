@@ -17,3 +17,14 @@ API-ul REST al aplicației Campus Sports Booking (Python, FastAPI, PostgreSQL).
    uvicorn app.main:app --reload
    ```
 5. Deschide http://localhost:8000/docs pentru documentația API.
+
+## Stilul codului
+
+Codul respectă PEP 8, verificat cu [Ruff](https://docs.astral.sh/ruff/) (regulile sunt în `pyproject.toml`).
+Înainte de commit:
+```powershell
+pip install -r requirements-dev.txt
+ruff check .
+ruff format .
+```
+La fiecare pull request, aceleași verificări rulează automat pe GitHub (`.github/workflows/stil-cod.yml`).
