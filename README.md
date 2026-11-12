@@ -17,6 +17,7 @@ API-ul REST al aplicației Campus Sports Booking (Python, FastAPI, PostgreSQL).
    uvicorn app.main:app --reload
    ```
 5. Deschide http://localhost:8000/docs pentru documentația API.
+6. Pentru aplicația completă, pornește și frontend-ul ([campus-sports-booking-frontend](https://github.com/Cei-Trei-Tokeni-De-La-Rasarit/campus-sports-booking-frontend)) cu `npm run dev`. Backend-ul acceptă cereri de la `http://localhost:5173` (variabila `CORS_ORIGINS` din `.env`).
 
 ## Stilul codului
 
