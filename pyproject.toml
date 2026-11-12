@@ -1,0 +1,13 @@
+# Regulile de stil pentru backend (vezi pagina „Coding style backend” din Confluence).
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# E, W: PEP 8 · F: erori de logică · I: ordinea importurilor · N: denumiri PEP 8
+select = ["E", "W", "F", "I", "N"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
