@@ -1,0 +1,13 @@
+# Dependabot verifică săptămânal dacă pachetele au versiuni noi
+# și deschide singur pull request-uri pentru actualizare.
+version: 2
+updates:
+  - package-ecosystem: 'pip'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'

@@ -29,3 +29,18 @@ ruff check .
 ruff format .
 ```
 La fiecare pull request, aceleași verificări rulează automat pe GitHub (`.github/workflows/stil-cod.yml`).
+
+## Teste
+
+Testele (pytest) folosesc o bază de date separată, care este golită la fiecare test.
+1. Creează baza de test (o singură dată):
+   ```powershell
+   psql -U postgres -c "CREATE DATABASE campus_sports_test;"
+   ```
+2. Completează `TEST_DATABASE_URL` în `.env` (vezi `.env.example`).
+3. Rulează testele:
+   ```powershell
+   pip install -r requirements-dev.txt
+   pytest
+   ```
+La fiecare pull request, testele rulează automat pe GitHub (`.github/workflows/teste.yml`).
