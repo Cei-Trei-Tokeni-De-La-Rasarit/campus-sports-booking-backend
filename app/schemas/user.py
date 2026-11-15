@@ -36,3 +36,16 @@ class UserRead(BaseModel):
             role=user.role,  # type: ignore[arg-type]
             email_notifications=user.email_notifications,
         )
+class UserLogin(BaseModel):
+    """Datele trimise la autentificare (Sign In)."""
+
+    email: EmailStr
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """Răspunsul returnat la Sign In."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
