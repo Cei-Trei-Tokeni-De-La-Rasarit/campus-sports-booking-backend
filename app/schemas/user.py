@@ -94,3 +94,20 @@ class UserRead(BaseModel):
             role=ROLE_FROM_DB[user.role],
             email_notifications=user.email_notifications,
         )
+
+
+class UserLogin(BaseModel):
+    """Datele trimise la autentificare."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    email: EmailStr = Field(alias="email")
+    password: str = Field(alias="parola")
+
+
+class TokenResponse(BaseModel):
+    """Răspunsul returnat la autentificare."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
