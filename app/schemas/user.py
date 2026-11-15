@@ -1,0 +1,38 @@
+"""Schemele Pydantic pentru utilizatori."""
+
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field
+
+from app.models.user import User
+
+UserRole = Literal["user", "administrator", "manager"]
+
+
+class UserRegister(BaseModel):
+    """Datele trimise la înregistrare (Sign Up)."""
+
+    name: str = Field(..., min_length=2, max_length=100)
+    email: EmailStr = Field(..., max_length=150)
+    password: str = Field(..., min_length=6, max_length=128)
+    email_notifications: bool = False
+
+
+class UserRead(BaseModel):
+    """Reprezentarea publică a unui utilizator (fără password_hash)."""
+
+    id: int
+    name: str
+    email: str
+    role: UserRole
+    email_notifications: bool
+
+    @classmethod
+    def from_model(cls, user: User) -> "UserRead":
+        return cls(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            role=user.role,  # type: ignore[arg-type]
+            email_notifications=user.email_notifications,
+        )
