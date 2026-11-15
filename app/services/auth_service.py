@@ -1,4 +1,4 @@
-"""Logica de business pentru înregistrare și autentificare."""
+"""Logica de business pentru înregistrarea utilizatorilor."""
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
