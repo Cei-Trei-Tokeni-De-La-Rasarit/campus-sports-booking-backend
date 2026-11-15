@@ -1,20 +1,24 @@
 """Schemele Pydantic pentru utilizatori."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
 
 from app.models.user import User
 
 UserRole = Literal["user", "administrator", "manager"]
 
+StrippedName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=2, max_length=100)
+]
+
 
 class UserRegister(BaseModel):
     """Datele trimise la înregistrare (Sign Up)."""
 
-    name: str = Field(..., min_length=2, max_length=100)
+    name: StrippedName
     email: EmailStr = Field(..., max_length=150)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     email_notifications: bool = False
 
 

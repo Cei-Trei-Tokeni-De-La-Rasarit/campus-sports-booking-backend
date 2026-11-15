@@ -7,6 +7,8 @@ from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.schemas.user import UserRegister
 
+ALLOWED_EMAIL_DOMAINS = ("@student.usv.ro", "@usv.ro")
+
 
 class EmailAlreadyExistsError(Exception):
     """Aruncată când adresa de email este deja înregistrată."""
@@ -30,6 +32,10 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 def register_user(db: Session, data: UserRegister) -> User:
     """Creează un cont nou cu rol implicit 'user'."""
     normalized_email = data.email.lower().strip()
+
+    if not normalized_email.endswith(ALLOWED_EMAIL_DOMAINS):
+        raise InvalidInstitutionalEmailError()
+
     if get_user_by_email(db, normalized_email) is not None:
         raise EmailAlreadyExistsError()
 
