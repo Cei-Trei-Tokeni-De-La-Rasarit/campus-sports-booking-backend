@@ -1,10 +1,10 @@
 """Logica aplicației pentru facilități."""
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.models.facility import Facility
-from app.schemas.facility import FacilityData
+from app.schemas.facility import FacilityData, FacilityFilters
 
 # Cea mai mare valoare pe care o poate stoca o coloană INT din PostgreSQL.
 MAX_DB_ID = 2_147_483_647
@@ -14,9 +14,21 @@ class FacilityHasSlotsError(Exception):
     """Facilitatea are intervale în calendar și nu poate fi ștearsă."""
 
 
-def list_facilities(db: Session) -> list[Facility]:
-    """Întoarce toate facilitățile, în ordinea în care au fost adăugate."""
-    return list(db.scalars(select(Facility).order_by(Facility.id)))
+def list_facilities(db: Session, filters: FacilityFilters) -> list[Facility]:
+    """Întoarce catalogul: facilitățile active care respectă filtrele date.
+
+    Facilitățile în mentenanță sau inactive nu se pot rezerva, deci nu apar
+    în catalog. Ordinea este cea în care au fost adăugate.
+    """
+    query = select(Facility).where(Facility.status == "active")
+    if filters.search is not None:
+        # autoescape: „%” și „_” din text se caută ca atare, nu ca șabloane SQL.
+        query = query.where(Facility.name.icontains(filters.search, autoescape=True))
+    if filters.sport is not None:
+        query = query.where(func.lower(Facility.sport) == filters.sport.lower())
+    if filters.min_capacity is not None:
+        query = query.where(Facility.capacity >= filters.min_capacity)
+    return list(db.scalars(query.order_by(Facility.id)))
 
 
 def get_facility(db: Session, facility_id: int) -> Facility | None:

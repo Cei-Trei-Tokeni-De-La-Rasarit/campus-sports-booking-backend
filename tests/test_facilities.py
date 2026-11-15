@@ -1,9 +1,12 @@
-"""Testele pentru operațiile CRUD pe facilități (/facilitati)."""
+"""Testele pentru facilități (/facilitati): CRUD și catalogul cu filtre."""
 
 from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from app.database import engine
 
 FACILITY = {
     "nume": "Sala de tenis Nr. 3",
@@ -12,6 +15,12 @@ FACILITY = {
     "capacitate": 4,
     "program": "Luni-Vineri 08:00-22:00",
 }
+
+
+def count_facilities() -> int:
+    """Numărul de facilități din baza de test, indiferent de status."""
+    with engine.connect() as connection:
+        return connection.scalar(text("SELECT COUNT(*) FROM facility"))
 
 
 def create_facility(client: TestClient) -> dict:
@@ -97,7 +106,7 @@ def test_update_missing_facility_returns_404_and_creates_nothing(
 
     assert response.status_code == 404
     assert response.json() == {"mesaj": "Facilitatea nu există."}
-    assert client.get("/facilitati").json() == []
+    assert count_facilities() == 0
 
 
 def test_delete_missing_facility_returns_404(client: TestClient) -> None:
@@ -134,7 +143,7 @@ def assert_invalid_data(client: TestClient, response) -> None:
     """Verifică răspunsul 400 și că nu s-a salvat nicio facilitate."""
     assert response.status_code == 400
     assert response.json()["mesaj"].startswith("Date invalide.")
-    assert client.get("/facilitati").json() == []
+    assert count_facilities() == 0
 
 
 def test_create_facility_with_empty_body_returns_400(client: TestClient) -> None:
@@ -310,3 +319,116 @@ def test_facility_with_text_id_returns_400(client: TestClient) -> None:
 
     assert response.status_code == 400
     assert response.json()["mesaj"].startswith("Date invalide.")
+
+
+# Catalogul facilităților, cu filtre (KAN-54).
+
+
+def add_facility(client: TestClient, **changes: object) -> int:
+    """Adaugă o facilitate cu datele de bază plus modificările date; întoarce id-ul."""
+    response = client.post("/facilitati", json={**FACILITY, **changes})
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def catalog_ids(client: TestClient, **filters: object) -> list[int]:
+    """Cere catalogul cu filtrele date și întoarce id-urile primite."""
+    response = client.get("/facilitati", params=filters)
+    assert response.status_code == 200
+    return [facility["id"] for facility in response.json()]
+
+
+@pytest.mark.parametrize("status", ["inactiva", "mentenanta"])
+def test_catalog_shows_only_active_facilities(client: TestClient, status: str) -> None:
+    active = add_facility(client)
+    add_facility(client, status=status)
+
+    assert catalog_ids(client) == [active]
+
+
+def test_catalog_search_matches_part_of_name_ignoring_case(
+    client: TestClient,
+) -> None:
+    tennis = add_facility(client, nume="Sala de tenis Nr. 3")
+    add_facility(client, nume="Bazin olimpic")
+
+    assert catalog_ids(client, cautare="TENIS") == [tennis]
+    assert catalog_ids(client, cautare="nr. 3") == [tennis]
+
+
+def test_catalog_search_without_match_returns_empty_list(client: TestClient) -> None:
+    add_facility(client)
+
+    assert catalog_ids(client, cautare="fotbal") == []
+
+
+@pytest.mark.parametrize("value", ["%", "_", "\\"])
+def test_catalog_search_treats_sql_wildcards_as_text(
+    client: TestClient, value: str
+) -> None:
+    add_facility(client, nume="Sala de tenis")
+    with_symbol = add_facility(client, nume=f"Sala {value} 2")
+
+    assert catalog_ids(client, cautare=value) == [with_symbol]
+
+
+def test_catalog_filters_by_sport_ignoring_case(client: TestClient) -> None:
+    tennis = add_facility(client, sport="Tenis")
+    add_facility(client, sport="Tenis de masă")
+    add_facility(client, sport="Înot")
+
+    assert catalog_ids(client, sport="tenis") == [tennis]
+
+
+def test_catalog_filters_by_minimum_capacity(client: TestClient) -> None:
+    add_facility(client, capacitate=3)
+    exact = add_facility(client, capacitate=4)
+    larger = add_facility(client, capacitate=20)
+
+    assert catalog_ids(client, capacitate_min=4) == [exact, larger]
+
+
+def test_catalog_combines_filters(client: TestClient) -> None:
+    match = add_facility(client, nume="Teren tenis 1", sport="Tenis", capacitate=4)
+    add_facility(client, nume="Teren tenis 2", sport="Tenis", capacitate=2)
+    add_facility(client, nume="Teren fotbal", sport="Fotbal", capacitate=22)
+
+    assert catalog_ids(client, cautare="teren", sport="Tenis", capacitate_min=4) == [
+        match
+    ]
+
+
+@pytest.mark.parametrize(
+    "filters", [{"cautare": ""}, {"cautare": "   "}, {"sport": ""}]
+)
+def test_catalog_empty_filter_is_ignored(client: TestClient, filters: dict) -> None:
+    facility = add_facility(client)
+
+    assert catalog_ids(client, **filters) == [facility]
+
+
+def test_catalog_ignores_unknown_parameters(client: TestClient) -> None:
+    facility = add_facility(client)
+
+    assert catalog_ids(client, necunoscut="x") == [facility]
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1001", "abc", "4.5", ""])
+def test_catalog_with_invalid_minimum_capacity_returns_400(
+    client: TestClient, value: str
+) -> None:
+    response = client.get("/facilitati", params={"capacitate_min": value})
+
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+    assert "capacitate_min" in response.json()["mesaj"]
+
+
+@pytest.mark.parametrize(("name", "limit"), [("cautare", 100), ("sport", 50)])
+def test_catalog_with_too_long_text_filter_returns_400(
+    client: TestClient, name: str, limit: int
+) -> None:
+    response = client.get("/facilitati", params={name: "a" * (limit + 1)})
+
+    assert response.status_code == 400
+    assert name in response.json()["mesaj"]

@@ -1,13 +1,14 @@
 """Endpoint-urile API pentru facilități (/facilitati)."""
 
 from datetime import date
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.facility import Facility
-from app.schemas.facility import FacilityData, FacilityRead
+from app.schemas.facility import FacilityData, FacilityFilters, FacilityRead
 from app.schemas.time_slot import SlotRead
 from app.services import facility_service, time_slot_service
 
@@ -25,9 +26,12 @@ def get_existing_facility(facility_id: int, db: Session = Depends(get_db)) -> Fa
 
 
 @router.get("", response_model=list[FacilityRead])
-def list_facilities(db: Session = Depends(get_db)) -> list[FacilityRead]:
-    """Catalogul facilităților."""
-    return [FacilityRead.from_model(f) for f in facility_service.list_facilities(db)]
+def list_facilities(
+    filters: Annotated[FacilityFilters, Query()], db: Session = Depends(get_db)
+) -> list[FacilityRead]:
+    """Catalogul facilităților active, cu filtre opționale."""
+    facilities = facility_service.list_facilities(db, filters)
+    return [FacilityRead.from_model(f) for f in facilities]
 
 
 @router.get("/{facility_id}", response_model=FacilityRead)
