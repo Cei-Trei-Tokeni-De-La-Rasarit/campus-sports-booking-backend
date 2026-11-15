@@ -1,17 +1,32 @@
 """Logica aplicației pentru facilități."""
 
+from datetime import datetime
+
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.models.facility import Facility
+from app.models.time_slot import TimeSlot
 from app.schemas.facility import FacilityData, FacilityFilters
 
 # Cea mai mare valoare pe care o poate stoca o coloană INT din PostgreSQL.
 MAX_DB_ID = 2_147_483_647
 
+# „Azi” înseamnă ziua din România, indiferent unde rulează serverul.
+ROMANIA_TIMEZONE = "Europe/Bucharest"
+
 
 class FacilityHasSlotsError(Exception):
     """Facilitatea are intervale în calendar și nu poate fi ștearsă."""
+
+
+def romania_now(db: Session) -> datetime:
+    """Data și ora de acum în România, fără fus orar atașat.
+
+    Ora se ia de la PostgreSQL, care are tabelul fusurilor orare inclus;
+    așa nu e nevoie de un pachet în plus în Python.
+    """
+    return db.scalar(select(func.timezone(ROMANIA_TIMEZONE, func.now())))
 
 
 def list_facilities(db: Session, filters: FacilityFilters) -> list[Facility]:
@@ -28,6 +43,16 @@ def list_facilities(db: Session, filters: FacilityFilters) -> list[Facility]:
         query = query.where(func.lower(Facility.sport) == filters.sport.lower())
     if filters.min_capacity is not None:
         query = query.where(Facility.capacity >= filters.min_capacity)
+    if filters.available_today:
+        now = romania_now(db)
+        # Un interval liber azi, care nu a început încă (se mai poate rezerva).
+        free_slot_today = select(TimeSlot.id).where(
+            TimeSlot.facility_id == Facility.id,
+            TimeSlot.status == "free",
+            TimeSlot.slot_date == now.date(),
+            TimeSlot.start_time > now.time(),
+        )
+        query = query.where(free_slot_today.exists())
     return list(db.scalars(query.order_by(Facility.id)))
 
 

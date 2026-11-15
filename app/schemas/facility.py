@@ -88,6 +88,8 @@ class FacilityFilters(BaseModel):
     min_capacity: int | None = Field(
         default=None, alias="capacitate_min", ge=1, le=MAX_CAPACITY
     )
+    # true: doar facilitățile care mai au azi cel puțin un interval liber.
+    available_today: bool = Field(default=False, alias="disponibile_azi")
 
     @field_validator("search", "sport")
     @classmethod

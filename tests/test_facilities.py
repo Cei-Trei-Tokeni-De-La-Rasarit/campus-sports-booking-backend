@@ -1,12 +1,14 @@
 """Testele pentru facilități (/facilitati): CRUD și catalogul cu filtre."""
 
 from collections.abc import Callable
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from app.database import engine
+from app.database import SessionLocal, engine
+from app.services import facility_service
 
 FACILITY = {
     "nume": "Sala de tenis Nr. 3",
@@ -432,3 +434,122 @@ def test_catalog_with_too_long_text_filter_returns_400(
 
     assert response.status_code == 400
     assert name in response.json()["mesaj"]
+
+
+# Filtrul disponibile_azi: ora de acum e fixată, ca testele să nu depindă de ceas.
+NOW = datetime(2026, 12, 1, 12, 0)
+TODAY = "2026-12-01"
+
+
+@pytest.fixture
+def fixed_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Face ca „acum” să fie 1 decembrie 2026, ora 12:00 (ora României)."""
+    monkeypatch.setattr(facility_service, "romania_now", lambda db: NOW)
+
+
+def test_romania_now_comes_from_database(client: TestClient) -> None:
+    with SessionLocal() as db:
+        now = facility_service.romania_now(db)
+
+    assert isinstance(now, datetime)
+    assert now.tzinfo is None
+
+
+@pytest.mark.usefixtures("fixed_now")
+def test_catalog_available_today_keeps_facility_with_free_slot_later_today(
+    client: TestClient, add_time_slot: Callable[..., int]
+) -> None:
+    available = add_facility(client)
+    add_time_slot(available, TODAY, "14:00", "15:00", "free")
+    add_facility(client)
+
+    assert catalog_ids(client, disponibile_azi="true") == [available]
+
+
+@pytest.mark.usefixtures("fixed_now")
+@pytest.mark.parametrize(
+    ("slot_date", "start", "end", "status"),
+    [
+        (TODAY, "14:00", "15:00", "booked"),
+        (TODAY, "14:00", "15:00", "blocked"),
+        (TODAY, "10:00", "11:00", "free"),
+        (TODAY, "11:30", "12:30", "free"),
+        (TODAY, "12:00", "13:00", "free"),
+        ("2026-11-30", "14:00", "15:00", "free"),
+        ("2026-12-02", "14:00", "15:00", "free"),
+    ],
+    ids=[
+        "rezervat",
+        "blocat",
+        "s-a-terminat",
+        "a-inceput",
+        "incepe-acum",
+        "ieri",
+        "maine",
+    ],
+)
+def test_catalog_available_today_skips_facility_without_bookable_slot_today(
+    client: TestClient,
+    add_time_slot: Callable[..., int],
+    slot_date: str,
+    start: str,
+    end: str,
+    status: str,
+) -> None:
+    facility = add_facility(client)
+    add_time_slot(facility, slot_date, start, end, status)
+
+    assert catalog_ids(client, disponibile_azi="true") == []
+
+
+@pytest.mark.usefixtures("fixed_now")
+def test_catalog_available_today_lists_facility_once_with_many_free_slots(
+    client: TestClient, add_time_slot: Callable[..., int]
+) -> None:
+    facility = add_facility(client)
+    add_time_slot(facility, TODAY, "14:00", "15:00", "free")
+    add_time_slot(facility, TODAY, "16:00", "17:00", "free")
+
+    assert catalog_ids(client, disponibile_azi="true") == [facility]
+
+
+@pytest.mark.usefixtures("fixed_now")
+def test_catalog_available_today_skips_inactive_facility(
+    client: TestClient, add_time_slot: Callable[..., int]
+) -> None:
+    facility = add_facility(client, status="mentenanta")
+    add_time_slot(facility, TODAY, "14:00", "15:00", "free")
+
+    assert catalog_ids(client, disponibile_azi="true") == []
+
+
+@pytest.mark.usefixtures("fixed_now")
+def test_catalog_available_today_combines_with_other_filters(
+    client: TestClient, add_time_slot: Callable[..., int]
+) -> None:
+    tennis = add_facility(client, sport="Tenis")
+    football = add_facility(client, sport="Fotbal")
+    add_time_slot(tennis, TODAY, "14:00", "15:00", "free")
+    add_time_slot(football, TODAY, "14:00", "15:00", "free")
+
+    assert catalog_ids(client, disponibile_azi="true", sport="tenis") == [tennis]
+
+
+@pytest.mark.usefixtures("fixed_now")
+def test_catalog_available_today_false_does_not_filter(
+    client: TestClient,
+) -> None:
+    facility = add_facility(client)
+
+    assert catalog_ids(client, disponibile_azi="false") == [facility]
+
+
+@pytest.mark.parametrize("value", ["abc", "2", ""])
+def test_catalog_with_invalid_available_today_returns_400(
+    client: TestClient, value: str
+) -> None:
+    response = client.get("/facilitati", params={"disponibile_azi": value})
+
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+    assert "disponibile_azi" in response.json()["mesaj"]
