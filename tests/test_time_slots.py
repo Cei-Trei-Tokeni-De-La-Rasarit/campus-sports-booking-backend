@@ -133,12 +133,19 @@ def test_list_slots_without_slots_returns_empty_list(client: TestClient) -> None
     assert response.json() == []
 
 
-def test_list_slots_for_period_of_31_days_returns_200(client: TestClient) -> None:
+def test_list_slots_for_period_of_31_days_includes_both_ends(
+    client: TestClient, add_time_slot: Callable[..., int]
+) -> None:
     facility_id = create_facility(client)
+    first_day = add_time_slot(facility_id, "2026-12-01")
+    last_day = add_time_slot(facility_id, "2026-12-31")
+    add_time_slot(facility_id, "2026-11-30")
+    add_time_slot(facility_id, "2027-01-01")
 
     response = get_slots(client, facility_id, de_la="2026-12-01", pana_la="2026-12-31")
 
     assert response.status_code == 200
+    assert [slot["id"] for slot in response.json()] == [first_day, last_day]
 
 
 def test_list_slots_for_period_longer_than_31_days_returns_400(
