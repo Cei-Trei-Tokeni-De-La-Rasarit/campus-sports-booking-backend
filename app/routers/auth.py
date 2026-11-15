@@ -11,12 +11,13 @@ from app.models.user import User
 from app.schemas.user import TokenResponse, UserLogin, UserRead, UserRegister
 from app.services import auth_service
 
-router = APIRouter(prefix="/auth", tags=["Autentificare"])
-bearer_scheme = HTTPBearer()
+router = APIRouter(prefix="/auth", tags=["Utilizatori"])
+users_router = APIRouter(prefix="/utilizatori", tags=["Utilizatori"])
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     """Extrage și validează utilizatorul curent din header-ul Authorization."""
@@ -25,6 +26,12 @@ def get_current_user(
         detail="Token invalid sau expirat.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Lipsește token-ul de autentificare.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = decode_access_token(credentials.credentials)
         user_id_str = payload.get("sub")
@@ -46,7 +53,7 @@ def get_current_user(
     status_code=status.HTTP_201_CREATED,
 )
 def sign_up(data: UserRegister, db: Session = Depends(get_db)) -> UserRead:
-    """Înregistrează un utilizator nou."""
+    """Creează un cont nou, cu rolul client."""
     try:
         user = auth_service.register_user(db, data)
     except auth_service.EmailAlreadyExistsError as error:
@@ -58,7 +65,7 @@ def sign_up(data: UserRegister, db: Session = Depends(get_db)) -> UserRead:
     return UserRead.from_model(user)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/autentificare", response_model=TokenResponse)
 def sign_in(data: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
     """Autentifică utilizatorul și returnează token-ul JWT."""
     try:
@@ -70,10 +77,10 @@ def sign_in(data: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
         ) from error
 
     token = create_access_token(user_id=user.id, role=user.role)
-    return TokenResponse(access_token=token, user=UserRead.from_model(user))
+    return TokenResponse(token=token, user=UserRead.from_model(user))
 
 
-@router.get("/me", response_model=UserRead)
+@users_router.get("/eu", response_model=UserRead)
 def get_me(current_user: User = Depends(get_current_user)) -> UserRead:
     """Returnează profilul utilizatorului autentificat curent."""
     return UserRead.from_model(current_user)

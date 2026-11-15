@@ -1,10 +1,14 @@
 """Testele pentru crearea unui cont (POST /auth/inregistrare)."""
 
+from datetime import datetime, timedelta, timezone
+
 import bcrypt
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app.core.security import ALGORITHM, SECRET_KEY
 from app.database import engine
 
 URL = "/auth/inregistrare"
@@ -218,31 +222,30 @@ def test_login_returns_token_and_current_user(client: TestClient) -> None:
     register(client)
 
     response = client.post(
-        "/auth/login",
+        "/auth/autentificare",
         json={"email": ACCOUNT["email"], "parola": ACCOUNT["parola"]},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["token_type"] == "bearer"
-    assert data["access_token"]
-    assert data["user"]["rol"] == "client"
-    assert "parola" not in data["user"]
-    assert "password_hash" not in data["user"]
+    assert data["token"]
+    assert data["utilizator"]["rol"] == "client"
+    assert "parola" not in data["utilizator"]
+    assert "password_hash" not in data["utilizator"]
 
     me_response = client.get(
-        "/auth/me",
-        headers={"Authorization": f"Bearer {data['access_token']}"},
+        "/utilizatori/eu",
+        headers={"Authorization": f"Bearer {data['token']}"},
     )
     assert me_response.status_code == 200
-    assert me_response.json() == data["user"]
+    assert me_response.json() == data["utilizator"]
 
 
 def test_login_with_invalid_credentials_returns_401(client: TestClient) -> None:
     register(client)
 
     response = client.post(
-        "/auth/login",
+        "/auth/autentificare",
         json={"email": ACCOUNT["email"], "parola": "parola-gresita"},
     )
 
@@ -252,6 +255,103 @@ def test_login_with_invalid_credentials_returns_401(client: TestClient) -> None:
 def test_me_without_token_returns_401(client: TestClient) -> None:
     register(client)
 
-    response = client.get("/auth/me")
+    response = client.get("/utilizatori/eu")
+
+    assert response.status_code == 401
+    assert response.json()["mesaj"] == "Lipsește token-ul de autentificare."
+
+
+def login(client: TestClient, **changes: object):
+    """Autentifică utilizatorul de test, cu modificări opționale."""
+    data = {"email": ACCOUNT["email"], "parola": ACCOUNT["parola"]}
+    data.update(changes)
+    return client.post("/auth/autentificare", json=data)
+
+
+def test_login_unknown_email_uses_same_error_as_wrong_password(
+    client: TestClient,
+) -> None:
+    register(client)
+    wrong_password = login(client, parola="parola-gresita")
+    unknown_email = login(client, email="necunoscut@student.usv.ro")
+
+    assert wrong_password.status_code == 401
+    assert unknown_email.status_code == 401
+    assert unknown_email.json() == wrong_password.json()
+
+
+@pytest.mark.parametrize("field", ["email", "parola"])
+@pytest.mark.parametrize("value", [None, ""])
+def test_login_with_null_or_empty_field_returns_400(
+    client: TestClient, field: str, value: object
+) -> None:
+    register(client)
+    assert login(client, **{field: value}).status_code == 400
+
+
+@pytest.mark.parametrize("field", ["email", "parola"])
+def test_login_with_missing_field_returns_400(client: TestClient, field: str) -> None:
+    register(client)
+    data = {"email": ACCOUNT["email"], "parola": ACCOUNT["parola"]}
+    del data[field]
+
+    assert client.post("/auth/autentificare", json=data).status_code == 400
+
+
+@pytest.mark.parametrize("password", ["a" * 73, "ă" * 40])
+def test_login_with_password_over_72_bytes_returns_400(
+    client: TestClient, password: str
+) -> None:
+    register(client)
+
+    assert login(client, parola=password).status_code == 400
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "not-a-jwt",
+        jwt.encode(
+            {
+                "sub": "1",
+                "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+            },
+            SECRET_KEY,
+            algorithm=ALGORITHM,
+        ),
+        jwt.encode({"sub": "1"}, SECRET_KEY, algorithm=ALGORITHM),
+        jwt.encode(
+            {
+                "sub": "1",
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            },
+            "wrong-secret-for-tests-32-bytes!!",
+            algorithm=ALGORITHM,
+        ),
+    ],
+)
+def test_me_with_invalid_token_returns_401(client: TestClient, token: str) -> None:
+    register(client)
+
+    response = client.get(
+        "/utilizatori/eu", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_deleted_user_cannot_use_existing_token(client: TestClient) -> None:
+    register(client)
+    token = login(client).json()["token"]
+
+    with engine.begin() as connection:
+        connection.execute(
+            text('DELETE FROM "user" WHERE email = :email'),
+            {"email": ACCOUNT["email"]},
+        )
+
+    response = client.get(
+        "/utilizatori/eu", headers={"Authorization": f"Bearer {token}"}
+    )
 
     assert response.status_code == 401

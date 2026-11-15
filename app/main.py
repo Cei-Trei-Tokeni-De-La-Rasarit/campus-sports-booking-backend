@@ -29,6 +29,7 @@ app.add_middleware(
 )
 app.include_router(facility_router.router)
 app.include_router(auth.router)
+app.include_router(auth.users_router)
 
 
 @app.exception_handler(StarletteHTTPException)

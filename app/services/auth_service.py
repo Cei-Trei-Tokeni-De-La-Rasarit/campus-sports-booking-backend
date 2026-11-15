@@ -46,6 +46,7 @@ def register_user(db: Session, data: UserRegister) -> User:
     try:
         db.commit()
     except IntegrityError as error:
+        # Două cereri simultane cu același email: a doua e oprită de UNIQUE.
         db.rollback()
         raise EmailAlreadyExistsError() from error
     db.refresh(user)

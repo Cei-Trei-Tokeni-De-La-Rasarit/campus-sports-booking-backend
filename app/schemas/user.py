@@ -25,6 +25,13 @@ ALLOWED_EMAIL_DOMAINS = ("student.usv.ro", "usv.ro")
 MAX_PASSWORD_BYTES = 72
 
 
+def _validate_password_bytes(password: str) -> str:
+    """Respinge parolele mai lungi de limita bcrypt în bytes."""
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Parola poate avea cel mult {MAX_PASSWORD_BYTES} de bytes.")
+    return password
+
+
 class UserRegister(BaseModel):
     """Datele trimise la crearea unui cont."""
 
@@ -62,12 +69,7 @@ class UserRegister(BaseModel):
     @field_validator("password")
     @classmethod
     def password_fits_bcrypt(cls, password: str) -> str:
-        """Respinge parolele mai lungi de limita bcrypt în bytes."""
-        if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
-            raise ValueError(
-                f"Parola poate avea cel mult {MAX_PASSWORD_BYTES} de bytes."
-            )
-        return password
+        return _validate_password_bytes(password)
 
 
 class UserRead(BaseModel):
@@ -99,12 +101,18 @@ class UserLogin(BaseModel):
     model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
 
     email: EmailStr = Field(alias="email")
-    password: str = Field(alias="parola")
+    password: str = Field(alias="parola", min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def password_fits_bcrypt(cls, password: str) -> str:
+        return _validate_password_bytes(password)
 
 
 class TokenResponse(BaseModel):
     """Răspunsul returnat la autentificare."""
 
-    access_token: str
-    token_type: str = "bearer"
-    user: UserRead
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    token: str = Field(alias="token")
+    user: UserRead = Field(alias="utilizator")
