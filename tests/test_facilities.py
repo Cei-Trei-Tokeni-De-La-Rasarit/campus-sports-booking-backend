@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+import pytest
 from fastapi.testclient import TestClient
 
 FACILITY = {
@@ -117,3 +118,195 @@ def test_delete_facility_with_time_slots_returns_409_and_keeps_it(
     assert response.status_code == 409
     assert "inactiva" in response.json()["mesaj"]
     assert client.get(f"/facilitati/{facility['id']}").json() == facility
+
+
+# Cazurile-limită pentru datele unei facilități (KAN-88).
+
+REQUIRED_FIELDS = ["nume", "sport", "locatie", "capacitate"]
+TEXT_FIELDS = ["nume", "sport", "locatie"]
+# Lungimea maximă a fiecărui câmp text, ca în baza de date.
+MAX_LENGTHS = {"nume": 100, "sport": 50, "locatie": 150, "program": 200}
+# Un id mai mare decât poate stoca o coloană INT din PostgreSQL.
+TOO_LARGE_ID = 99_999_999_999
+
+
+def assert_invalid_data(client: TestClient, response) -> None:
+    """Verifică răspunsul 400 și că nu s-a salvat nicio facilitate."""
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+    assert client.get("/facilitati").json() == []
+
+
+def test_create_facility_with_empty_body_returns_400(client: TestClient) -> None:
+    response = client.post("/facilitati", json={})
+
+    assert_invalid_data(client, response)
+
+
+def test_create_facility_without_body_returns_400(client: TestClient) -> None:
+    response = client.post("/facilitati")
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("field", REQUIRED_FIELDS)
+def test_create_facility_with_missing_field_returns_400(
+    client: TestClient, field: str
+) -> None:
+    data = {key: value for key, value in FACILITY.items() if key != field}
+
+    response = client.post("/facilitati", json=data)
+
+    assert_invalid_data(client, response)
+    assert field in response.json()["mesaj"]
+
+
+@pytest.mark.parametrize("field", [*REQUIRED_FIELDS, "status"])
+def test_create_facility_with_null_field_returns_400(
+    client: TestClient, field: str
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, field: None})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+@pytest.mark.parametrize("field", TEXT_FIELDS)
+def test_create_facility_with_blank_text_returns_400(
+    client: TestClient, field: str, value: str
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, field: value})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("field", MAX_LENGTHS)
+def test_create_facility_with_too_long_text_returns_400(
+    client: TestClient, field: str
+) -> None:
+    too_long = "a" * (MAX_LENGTHS[field] + 1)
+
+    response = client.post("/facilitati", json={**FACILITY, field: too_long})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("field", MAX_LENGTHS)
+def test_create_facility_with_text_at_max_length_returns_201(
+    client: TestClient, field: str
+) -> None:
+    longest = "a" * MAX_LENGTHS[field]
+
+    response = client.post("/facilitati", json={**FACILITY, field: longest})
+
+    assert response.status_code == 201
+    assert response.json()[field] == longest
+
+
+def test_create_facility_strips_spaces_around_text(client: TestClient) -> None:
+    data = {
+        **FACILITY,
+        "nume": "  Sala de tenis  ",
+        "sport": " Tenis ",
+        "locatie": " Corp A ",
+        "program": " Luni-Vineri ",
+    }
+
+    response = client.post("/facilitati", json=data)
+
+    assert response.status_code == 201
+    saved = client.get(f"/facilitati/{response.json()['id']}").json()
+    assert saved["nume"] == "Sala de tenis"
+    assert saved["sport"] == "Tenis"
+    assert saved["locatie"] == "Corp A"
+    assert saved["program"] == "Luni-Vineri"
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_create_facility_with_empty_schedule_saves_null(
+    client: TestClient, value: str | None
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, "program": value})
+
+    assert response.status_code == 201
+    assert response.json()["program"] is None
+
+
+@pytest.mark.parametrize("capacity", [0, -1, 1001])
+def test_create_facility_with_capacity_out_of_range_returns_400(
+    client: TestClient, capacity: int
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, "capacitate": capacity})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("capacity", [1, 1000])
+def test_create_facility_with_capacity_at_limit_returns_201(
+    client: TestClient, capacity: int
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, "capacitate": capacity})
+
+    assert response.status_code == 201
+    assert response.json()["capacitate"] == capacity
+
+
+@pytest.mark.parametrize("capacity", ["4", "patru", 4.5, 4.0, True, [4]])
+def test_create_facility_with_wrong_capacity_type_returns_400(
+    client: TestClient, capacity: object
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, "capacitate": capacity})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("value", [123, True, ["Sala"]])
+def test_create_facility_with_wrong_name_type_returns_400(
+    client: TestClient, value: object
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, "nume": value})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize("status", ["inexistent", "active", "ACTIVA", ""])
+def test_create_facility_with_unknown_status_returns_400(
+    client: TestClient, status: str
+) -> None:
+    response = client.post("/facilitati", json={**FACILITY, "status": status})
+
+    assert_invalid_data(client, response)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"nume": "   "}, {"capacitate": 0}, {"capacitate": "6"}, {"status": "x"}],
+)
+def test_update_facility_with_invalid_data_returns_400_and_keeps_it(
+    client: TestClient, changes: dict
+) -> None:
+    facility = create_facility(client)
+
+    response = client.put(f"/facilitati/{facility['id']}", json={**FACILITY, **changes})
+
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+    assert client.get(f"/facilitati/{facility['id']}").json() == facility
+
+
+@pytest.mark.parametrize("facility_id", [0, -1, TOO_LARGE_ID])
+@pytest.mark.parametrize("method", ["get", "put", "delete"])
+def test_facility_with_impossible_id_returns_404(
+    client: TestClient, method: str, facility_id: int
+) -> None:
+    response = client.request(method, f"/facilitati/{facility_id}", json=FACILITY)
+
+    assert response.status_code == 404
+    assert response.json() == {"mesaj": "Facilitatea nu există."}
+
+
+def test_facility_with_text_id_returns_400(client: TestClient) -> None:
+    response = client.get("/facilitati/abc")
+
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
