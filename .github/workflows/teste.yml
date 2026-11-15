@@ -1,0 +1,42 @@
+# Rulează testele automate (pytest) la fiecare pull request către main.
+name: Teste
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Workflow-ul doar citește codul; nu are nevoie de alte drepturi.
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: Teste
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campus_sports_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/campus_sports_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Instalează dependențele
+        run: pip install -r requirements-dev.txt
+      - name: Rulează testele (pytest)
+        run: pytest -v
