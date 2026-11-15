@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from app.models.facility import Facility
 from app.schemas.facility import FacilityData
 
+# Cea mai mare valoare pe care o poate stoca o coloană INT din PostgreSQL.
+MAX_DB_ID = 2_147_483_647
+
 
 class FacilityHasSlotsError(Exception):
     """Facilitatea are intervale în calendar și nu poate fi ștearsă."""
@@ -18,6 +21,10 @@ def list_facilities(db: Session) -> list[Facility]:
 
 def get_facility(db: Session, facility_id: int) -> Facility | None:
     """Întoarce facilitatea cu id-ul dat sau None dacă nu există."""
+    # Un id în afara intervalului unei coloane INT nu poate exista în baza de
+    # date; fără această verificare, PostgreSQL ar da eroare (500).
+    if not 1 <= facility_id <= MAX_DB_ID:
+        return None
     return db.get(Facility, facility_id)
 
 

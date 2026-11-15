@@ -1,280 +1,257 @@
-"""Teste de integrare pentru endpoint-ul POST /auth/register."""
+"""Testele pentru crearea unui cont (POST /auth/inregistrare)."""
 
+import bcrypt
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from app.database import engine
+
+URL = "/auth/inregistrare"
+ACCOUNT = {
+    "nume": "Andrei Popescu",
+    "email": "andrei.popescu@student.usv.ro",
+    "parola": "parola-sigura",
+}
 
 
-def test_register_success_student_email(client: TestClient) -> None:
-    """Înregistrare reușită cu email @student.usv.ro; parola nu este expusă."""
-    payload = {
-        "name": "Ion Popescu",
-        "email": "Ion.Popescu@student.usv.ro",
-        "password": "parolaSigura123",
-        "email_notifications": True,
-    }
-    response = client.post("/auth/register", json=payload)
-
-    assert response.status_code == 201
-    body = response.json()
-    assert body["name"] == "Ion Popescu"
-    assert body["email"] == "ion.popescu@student.usv.ro"
-    assert body["role"] == "user"
-    assert body["email_notifications"] is True
-    assert isinstance(body["id"], int)
-    assert "password" not in body
-    assert "password_hash" not in body
+def register(client: TestClient, **changes: object):
+    """Trimite cererea de înregistrare cu datele de bază, plus modificările date."""
+    return client.post(URL, json={**ACCOUNT, **changes})
 
 
-def test_register_success_staff_email_with_defaults(client: TestClient) -> None:
-    """Înregistrare reușită cu @usv.ro și valoarea implicită pentru notificări."""
-    payload = {
-        "name": "Maria Ionescu",
-        "email": "maria.ionescu@usv.ro",
-        "password": "parolaSigura123",
-    }
-    response = client.post("/auth/register", json=payload)
-
-    assert response.status_code == 201
-    body = response.json()
-    assert body["email"] == "maria.ionescu@usv.ro"
-    assert body["role"] == "user"
-    assert body["email_notifications"] is False
+def count_users() -> int:
+    """Numărul de conturi din baza de test."""
+    with engine.connect() as connection:
+        return connection.scalar(text('SELECT COUNT(*) FROM "user"'))
 
 
-def test_register_strips_spaces_around_name_and_email(client: TestClient) -> None:
-    """Spațiile de la începutul și sfârșitul numelui/emailului sunt eliminate."""
-    payload = {
-        "name": "  Andrei Vasile  ",
-        "email": "  Andrei.Vasile@student.usv.ro  ",
-        "password": "parolaSigura123",
-    }
-    response = client.post("/auth/register", json=payload)
+def assert_invalid_data(response) -> None:
+    """Verifică răspunsul 400 și că nu s-a creat niciun cont."""
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+    assert count_users() == 0
+
+
+def test_register_returns_201_with_user_data(client: TestClient) -> None:
+    response = register(client)
 
     assert response.status_code == 201
-    body = response.json()
-    assert body["name"] == "Andrei Vasile"
-    assert body["email"] == "andrei.vasile@student.usv.ro"
-
-
-def test_register_ignores_role_escalation_attempt(client: TestClient) -> None:
-    """Un utilizator nou primește mereu rolul 'user', chiar dacă trimite alt rol."""
-    payload = {
-        "name": "Tentativa Admin",
-        "email": "admin.fals@student.usv.ro",
-        "password": "parolaSigura123",
-        "role": "administrator",
+    data = response.json()
+    assert data["id"] > 0
+    assert data == {
+        "id": data["id"],
+        "nume": "Andrei Popescu",
+        "email": "andrei.popescu@student.usv.ro",
+        "rol": "client",
+        "notificari_email": False,
     }
-    response = client.post("/auth/register", json=payload)
-
-    assert response.status_code in (201, 400)
-    if response.status_code == 201:
-        assert response.json()["role"] == "user"
 
 
-def test_register_duplicate_email_returns_409(client: TestClient) -> None:
-    """Un email deja existent (inclusiv cu majuscule diferite) returnează 409."""
-    first = client.post(
-        "/auth/register",
-        json={
-            "name": "Ion Popescu",
-            "email": "duplicat@student.usv.ro",
-            "password": "parolaSigura123",
-        },
-    )
-    assert first.status_code == 201
+def test_register_saves_bcrypt_hash_not_password(client: TestClient) -> None:
+    register(client)
 
-    second = client.post(
-        "/auth/register",
-        json={
-            "name": "Alt Nume",
-            "email": "DUPLICAT@student.usv.ro",
-            "password": "altaParola123",
-        },
-    )
-    assert second.status_code == 409
+    with engine.connect() as connection:
+        saved = connection.scalar(text('SELECT password_hash FROM "user"'))
+    assert saved != ACCOUNT["parola"]
+    assert bcrypt.checkpw(ACCOUNT["parola"].encode(), saved.encode())
+
+
+def test_register_response_has_no_password(client: TestClient) -> None:
+    response = register(client)
+
+    assert "parola" not in response.json()
+    assert "password_hash" not in response.json()
+
+
+def test_register_with_email_notifications(client: TestClient) -> None:
+    response = register(client, notificari_email=True)
+
+    assert response.status_code == 201
+    assert response.json()["notificari_email"] is True
+
+
+def test_register_ignores_role_sent_by_client(client: TestClient) -> None:
+    response = register(client, rol="administrator")
+
+    assert response.status_code == 201
+    assert response.json()["rol"] == "client"
 
 
 @pytest.mark.parametrize(
-    "invalid_email",
+    "email", ["andrei.popescu@student.usv.ro", "andrei.popescu@usv.ro"]
+)
+def test_register_accepts_institutional_domains(client: TestClient, email: str) -> None:
+    assert register(client, email=email).status_code == 201
+
+
+def test_register_trims_name_and_lowercases_email(client: TestClient) -> None:
+    response = register(
+        client, nume="  Andrei Popescu  ", email="Andrei.Popescu@Student.USV.ro"
+    )
+
+    assert response.json()["nume"] == "Andrei Popescu"
+    assert response.json()["email"] == "andrei.popescu@student.usv.ro"
+
+
+def test_register_with_existing_email_returns_409(client: TestClient) -> None:
+    register(client)
+
+    response = register(client, nume="Alt Nume")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "mesaj": "Există deja un cont înregistrat cu această adresă de email."
+    }
+    assert count_users() == 1
+
+
+def test_register_with_same_email_in_capitals_returns_409(
+    client: TestClient,
+) -> None:
+    register(client)
+
+    response = register(client, email="ANDREI.POPESCU@STUDENT.USV.RO")
+
+    assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "email",
     [
-        "utilizator@gmail.com",
-        "utilizator@yahoo.com",
-        "student@fakeusv.ro",
-        "student@fake-student.usv.ro",
-        "student@student.usv.ro.evil.com",
-        "student@usv.com",
-        "nu-este-email",
-        "",
-        "   ",
+        "andrei@gmail.com",
+        "andrei@usv.ro.example.com",
+        "andrei@fakeusv.ro",
+        "andrei@student.usv.com",
     ],
 )
-def test_register_non_institutional_or_invalid_email_returns_400(
-    client: TestClient, invalid_email: str
+def test_register_with_non_institutional_email_returns_400(
+    client: TestClient, email: str
 ) -> None:
-    """Adresele din afara domeniilor USV sau malformate sunt respinse cu 400."""
+    response = register(client, email=email)
+
+    assert_invalid_data(response)
+    assert "instituționale" in response.json()["mesaj"]
+
+
+@pytest.mark.parametrize("email", ["andrei", "andrei@", "@usv.ro", ""])
+def test_register_with_invalid_email_returns_400(
+    client: TestClient, email: str
+) -> None:
+    assert_invalid_data(register(client, email=email))
+
+
+def test_register_with_password_of_8_characters_returns_201(
+    client: TestClient,
+) -> None:
+    assert register(client, parola="a" * 8).status_code == 201
+
+
+def test_register_with_password_of_7_characters_returns_400(
+    client: TestClient,
+) -> None:
+    assert_invalid_data(register(client, parola="a" * 7))
+
+
+def test_register_with_password_of_72_characters_returns_201(
+    client: TestClient,
+) -> None:
+    assert register(client, parola="a" * 72).status_code == 201
+
+
+def test_register_with_password_of_73_characters_returns_400(
+    client: TestClient,
+) -> None:
+    assert_invalid_data(register(client, parola="a" * 73))
+
+
+def test_register_with_password_over_72_bytes_returns_400(
+    client: TestClient,
+) -> None:
+    # 40 de litere „ă” au 40 de caractere, dar 80 de bytes.
+    assert_invalid_data(register(client, parola="ă" * 40))
+
+
+@pytest.mark.parametrize("name", ["", "   ", "A", "A" * 101])
+def test_register_with_invalid_name_returns_400(client: TestClient, name: str) -> None:
+    assert_invalid_data(register(client, nume=name))
+
+
+@pytest.mark.parametrize("field", ["nume", "email", "parola"])
+def test_register_without_field_returns_400(client: TestClient, field: str) -> None:
+    data = {key: value for key, value in ACCOUNT.items() if key != field}
+
+    response = client.post(URL, json=data)
+
+    assert_invalid_data(response)
+    assert field in response.json()["mesaj"]
+
+
+@pytest.mark.parametrize("field", ["nume", "email", "parola"])
+def test_register_with_null_field_returns_400(client: TestClient, field: str) -> None:
+    assert_invalid_data(register(client, **{field: None}))
+
+
+@pytest.mark.parametrize("field", ["nume", "email", "parola"])
+def test_register_with_number_instead_of_text_returns_400(
+    client: TestClient, field: str
+) -> None:
+    assert_invalid_data(register(client, **{field: 12345678}))
+
+
+@pytest.mark.parametrize("value", ["da", 1, None])
+def test_register_with_invalid_notifications_returns_400(
+    client: TestClient, value: object
+) -> None:
+    assert_invalid_data(register(client, notificari_email=value))
+
+
+def test_register_with_empty_body_returns_400(client: TestClient) -> None:
+    assert_invalid_data(client.post(URL, json={}))
+
+
+def test_register_without_body_returns_400(client: TestClient) -> None:
+    assert_invalid_data(client.post(URL))
+
+
+def test_login_returns_token_and_current_user(client: TestClient) -> None:
+    register(client)
+
     response = client.post(
-        "/auth/register",
-        json={
-            "name": "Utilizator Test",
-            "email": invalid_email,
-            "password": "parolaSigura123",
-        },
+        "/auth/login",
+        json={"email": ACCOUNT["email"], "parola": ACCOUNT["parola"]},
     )
-    assert response.status_code == 400
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["token_type"] == "bearer"
+    assert data["access_token"]
+    assert data["user"]["rol"] == "client"
+    assert "parola" not in data["user"]
+    assert "password_hash" not in data["user"]
+
+    me_response = client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {data['access_token']}"},
+    )
+    assert me_response.status_code == 200
+    assert me_response.json() == data["user"]
 
 
-def test_register_with_empty_or_missing_body_returns_400(client: TestClient) -> None:
-    """Cererile fără body sau cu JSON gol returnează 400."""
-    assert client.post("/auth/register").status_code == 400
-    assert client.post("/auth/register", json={}).status_code == 400
+def test_login_with_invalid_credentials_returns_401(client: TestClient) -> None:
+    register(client)
 
-
-@pytest.mark.parametrize("missing_field", ["name", "email", "password"])
-def test_register_with_missing_field_returns_400(
-    client: TestClient, missing_field: str
-) -> None:
-    """Lipsa oricărui câmp obligatoriu returnează 400."""
-    payload = {
-        "name": "Ion Popescu",
-        "email": "complet@student.usv.ro",
-        "password": "parolaSigura123",
-    }
-    del payload[missing_field]
-
-    response = client.post("/auth/register", json=payload)
-    assert response.status_code == 400
-
-
-@pytest.mark.parametrize(
-    "null_field", ["name", "email", "password", "email_notifications"]
-)
-def test_register_with_null_field_returns_400(
-    client: TestClient, null_field: str
-) -> None:
-    """Transmiterea valorii null pentru orice câmp returnează 400."""
-    payload: dict[str, object] = {
-        "name": "Ion Popescu",
-        "email": "nulltest@student.usv.ro",
-        "password": "parolaSigura123",
-        "email_notifications": False,
-    }
-    payload[null_field] = None
-
-    response = client.post("/auth/register", json=payload)
-    assert response.status_code == 400
-
-
-@pytest.mark.parametrize("blank_name", ["", "   ", "\t\n"])
-def test_register_with_blank_name_returns_400(
-    client: TestClient, blank_name: str
-) -> None:
-    """Un nume gol sau format doar din spații returnează 400."""
     response = client.post(
-        "/auth/register",
-        json={
-            "name": blank_name,
-            "email": "nume.gol@student.usv.ro",
-            "password": "parolaSigura123",
-        },
+        "/auth/login",
+        json={"email": ACCOUNT["email"], "parola": "parola-gresita"},
     )
-    assert response.status_code == 400
+
+    assert response.status_code == 401
 
 
-def test_register_name_length_boundaries(client: TestClient) -> None:
-    """Verifică limitele de lungime ale numelui (minim 2, maxim 100 caractere)."""
-    too_short = client.post(
-        "/auth/register",
-        json={
-            "name": "A",
-            "email": "nume.scurt@student.usv.ro",
-            "password": "parolaSigura123",
-        },
-    )
-    assert too_short.status_code == 400
+def test_me_without_token_returns_401(client: TestClient) -> None:
+    register(client)
 
-    at_max = client.post(
-        "/auth/register",
-        json={
-            "name": "A" * 100,
-            "email": "nume.maxim@student.usv.ro",
-            "password": "parolaSigura123",
-        },
-    )
-    assert at_max.status_code == 201
+    response = client.get("/auth/me")
 
-    too_long = client.post(
-        "/auth/register",
-        json={
-            "name": "A" * 101,
-            "email": "nume.lung@student.usv.ro",
-            "password": "parolaSigura123",
-        },
-    )
-    assert too_long.status_code == 400
-
-
-def test_register_password_length_boundaries(client: TestClient) -> None:
-    """Verifică limitele de lungime ale parolei (sub minim și peste maxim)."""
-    too_short = client.post(
-        "/auth/register",
-        json={
-            "name": "Ion Popescu",
-            "email": "parola.scurta@student.usv.ro",
-            "password": "12345",
-        },
-    )
-    assert too_short.status_code == 400
-
-    valid_min = client.post(
-        "/auth/register",
-        json={
-            "name": "Ion Popescu",
-            "email": "parola.valida@student.usv.ro",
-            "password": "parola12",
-        },
-    )
-    assert valid_min.status_code == 201
-
-    too_long = client.post(
-        "/auth/register",
-        json={
-            "name": "Ion Popescu",
-            "email": "parola.lunga@student.usv.ro",
-            "password": "x" * 129,
-        },
-    )
-    assert too_long.status_code == 400
-
-
-@pytest.mark.parametrize(
-    "bad_payload",
-    [
-        {
-            "name": 12345,
-            "email": "tip.gresit1@student.usv.ro",
-            "password": "parolaSigura123",
-        },
-        {
-            "name": ["Ion"],
-            "email": "tip.gresit2@student.usv.ro",
-            "password": "parolaSigura123",
-        },
-        {
-            "name": "Ion Popescu",
-            "email": 999,
-            "password": "parolaSigura123",
-        },
-        {
-            "name": "Ion Popescu",
-            "email": "tip.gresit3@student.usv.ro",
-            "password": "parolaSigura123",
-            "email_notifications": "nu-este-bool",
-        },
-    ],
-)
-def test_register_with_wrong_field_types_returns_400(
-    client: TestClient, bad_payload: dict[str, object]
-) -> None:
-    """Tipurile de date invalide în JSON sunt respinse cu 400."""
-    response = client.post("/auth/register", json=bad_payload)
-    assert response.status_code == 400
+    assert response.status_code == 401

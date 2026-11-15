@@ -19,7 +19,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    """Extrage și validează utilizatorul curent din header-ul Authorization: Bearer <token>."""
+    """Extrage și validează utilizatorul curent din header-ul Authorization."""
     unauthorized_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token invalid sau expirat.",
@@ -41,7 +41,7 @@ def get_current_user(
 
 
 @router.post(
-    "/register",
+    "/inregistrare",
     response_model=UserRead,
     status_code=status.HTTP_201_CREATED,
 )
@@ -49,12 +49,6 @@ def sign_up(data: UserRegister, db: Session = Depends(get_db)) -> UserRead:
     """Înregistrează un utilizator nou."""
     try:
         user = auth_service.register_user(db, data)
-    except auth_service.InvalidInstitutionalEmailError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Sunt permise doar adresele de email instituționale "
-            "(@student.usv.ro sau @usv.ro).",
-        ) from error
     except auth_service.EmailAlreadyExistsError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

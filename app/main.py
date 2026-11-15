@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import engine
-from app.routers import facility_router, auth
+from app.routers import auth, facility_router
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ app.add_middleware(
 )
 app.include_router(facility_router.router)
 app.include_router(auth.router)
+
 
 @app.exception_handler(StarletteHTTPException)
 def handle_http_error(_request: Request, error: StarletteHTTPException) -> JSONResponse:

@@ -1,13 +1,12 @@
 """Logica de business pentru înregistrare și autentificare."""
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.schemas.user import UserRegister
-
-ALLOWED_EMAIL_DOMAINS = ("@student.usv.ro", "@usv.ro")
 
 
 class EmailAlreadyExistsError(Exception):
@@ -33,9 +32,6 @@ def register_user(db: Session, data: UserRegister) -> User:
     """Creează un cont nou cu rol implicit 'user'."""
     normalized_email = data.email.lower().strip()
 
-    if not normalized_email.endswith(ALLOWED_EMAIL_DOMAINS):
-        raise InvalidInstitutionalEmailError()
-
     if get_user_by_email(db, normalized_email) is not None:
         raise EmailAlreadyExistsError()
 
@@ -47,7 +43,11 @@ def register_user(db: Session, data: UserRegister) -> User:
         email_notifications=data.email_notifications,
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise EmailAlreadyExistsError() from error
     db.refresh(user)
     return user
 
