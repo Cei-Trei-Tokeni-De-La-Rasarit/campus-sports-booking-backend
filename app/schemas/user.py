@@ -1,8 +1,4 @@
-"""Datele primite și trimise de API pentru utilizatori.
-
-Câmpurile din cod sunt în engleză, ca în baza de date, iar în JSON apar
-numele din specificația OpenAPI, în română (prin alias).
-"""
+"""Datele primite și trimise de API pentru utilizatori."""
 
 from typing import Annotated, Literal
 
@@ -19,19 +15,21 @@ from app.models.user import User
 
 UserRole = Literal["client", "manager", "administrator"]
 
-# Valorile pentru rol din baza de date și echivalentul lor din API.
 ROLE_FROM_DB: dict[str, str] = {
     "user": "client",
     "manager": "manager",
     "administrator": "administrator",
 }
 
-# Doar adresele instituționale USV pot crea cont.
 ALLOWED_EMAIL_DOMAINS = ("student.usv.ro", "usv.ro")
-
-# bcrypt folosește doar primii 72 de bytes din parolă și dă eroare peste această
-# limită. O literă cu diacritice ocupă 2 bytes, deci verificăm bytes, nu litere.
 MAX_PASSWORD_BYTES = 72
+
+
+def _validate_password_bytes(password: str) -> str:
+    """Respinge parolele mai lungi de limita bcrypt în bytes."""
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"Parola poate avea cel mult {MAX_PASSWORD_BYTES} de bytes.")
+    return password
 
 
 class UserRegister(BaseModel):
@@ -39,23 +37,29 @@ class UserRegister(BaseModel):
 
     model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
 
-    # Spațiile de la capete se elimină doar din nume, nu și din parolă.
     name: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=2, max_length=100)
     ] = Field(alias="nume")
     email: EmailStr = Field(alias="email", max_length=150)
     password: str = Field(alias="parola", min_length=8, max_length=MAX_PASSWORD_BYTES)
-    # strict=True: se acceptă doar true sau false, nu "da" sau 1.
     email_notifications: bool = Field(
         default=False, alias="notificari_email", strict=True
     )
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        """Normalizează spațiile și literele înainte de validarea adresei."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     @field_validator("email")
     @classmethod
-    def institutional_email(cls, email: str) -> str:
+    def institutional_email(cls, email: EmailStr) -> EmailStr:
         """Acceptă doar emailurile instituționale și le scrie cu litere mici."""
-        email = email.lower()
-        if email.rsplit("@", 1)[1] not in ALLOWED_EMAIL_DOMAINS:
+        domain = str(email).rsplit("@", 1)[-1]
+        if domain not in ALLOWED_EMAIL_DOMAINS:
             raise ValueError(
                 "Se acceptă doar adrese de email instituționale "
                 "(@student.usv.ro sau @usv.ro)."
@@ -65,16 +69,11 @@ class UserRegister(BaseModel):
     @field_validator("password")
     @classmethod
     def password_fits_bcrypt(cls, password: str) -> str:
-        """Respinge parolele mai lungi de 72 de bytes (limita bcrypt)."""
-        if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
-            raise ValueError(
-                f"Parola poate avea cel mult {MAX_PASSWORD_BYTES} de bytes."
-            )
-        return password
+        return _validate_password_bytes(password)
 
 
 class UserRead(BaseModel):
-    """Un utilizator, așa cum este trimis de API (fără parolă sau hash)."""
+    """Un utilizator trimis de API, fără parolă sau hash."""
 
     model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
 
@@ -86,7 +85,7 @@ class UserRead(BaseModel):
 
     @classmethod
     def from_model(cls, user: User) -> "UserRead":
-        """Construiește răspunsul API pornind de la un rând din baza de date."""
+        """Construiește răspunsul API dintr-un rând din baza de date."""
         return cls(
             id=user.id,
             name=user.name,
@@ -94,3 +93,26 @@ class UserRead(BaseModel):
             role=ROLE_FROM_DB[user.role],
             email_notifications=user.email_notifications,
         )
+
+
+class UserLogin(BaseModel):
+    """Datele trimise la autentificare."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    email: EmailStr = Field(alias="email")
+    password: str = Field(alias="parola", min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def password_fits_bcrypt(cls, password: str) -> str:
+        return _validate_password_bytes(password)
+
+
+class TokenResponse(BaseModel):
+    """Răspunsul returnat la autentificare."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    token: str = Field(alias="token")
+    user: UserRead = Field(alias="utilizator")

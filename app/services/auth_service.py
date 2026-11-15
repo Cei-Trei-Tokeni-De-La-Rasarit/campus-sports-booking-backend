@@ -4,13 +4,22 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.schemas.user import UserRegister
 
 
 class EmailAlreadyExistsError(Exception):
     """Aruncată când adresa de email este deja înregistrată."""
+
+
+class InvalidCredentialsError(Exception):
+    """Aruncată când email-ul sau parola sunt incorecte."""
+
+
+def get_user_by_id(db: Session, user_id: int) -> User | None:
+    """Caută un utilizator după ID."""
+    return db.get(User, user_id)
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
@@ -22,6 +31,7 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 def register_user(db: Session, data: UserRegister) -> User:
     """Creează un cont nou cu rol implicit 'user'."""
     normalized_email = data.email.lower().strip()
+
     if get_user_by_email(db, normalized_email) is not None:
         raise EmailAlreadyExistsError()
 
@@ -40,4 +50,12 @@ def register_user(db: Session, data: UserRegister) -> User:
         db.rollback()
         raise EmailAlreadyExistsError() from error
     db.refresh(user)
+    return user
+
+
+def authenticate_user(db: Session, email: str, password: str) -> User:
+    """Verifică credențialele și întoarce utilizatorul dacă sunt valide."""
+    user = get_user_by_email(db, email)
+    if user is None or not verify_password(password, user.password_hash):
+        raise InvalidCredentialsError()
     return user
