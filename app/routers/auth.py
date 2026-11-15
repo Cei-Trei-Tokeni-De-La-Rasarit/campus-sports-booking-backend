@@ -7,16 +7,16 @@ from app.database import get_db
 from app.schemas.user import UserRead, UserRegister
 from app.services import auth_service
 
-router = APIRouter(prefix="/auth", tags=["Autentificare"])
+router = APIRouter(prefix="/auth", tags=["Utilizatori"])
 
 
 @router.post(
-    "/register",
+    "/inregistrare",
     response_model=UserRead,
     status_code=status.HTTP_201_CREATED,
 )
 def sign_up(data: UserRegister, db: Session = Depends(get_db)) -> UserRead:
-    """Înregistrează un utilizator nou."""
+    """Creează un cont nou, cu rolul client."""
     try:
         user = auth_service.register_user(db, data)
     except auth_service.EmailAlreadyExistsError as error:

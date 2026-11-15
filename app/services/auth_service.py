@@ -1,6 +1,7 @@
 """Logica de business pentru înregistrarea utilizatorilor."""
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
@@ -32,6 +33,11 @@ def register_user(db: Session, data: UserRegister) -> User:
         email_notifications=data.email_notifications,
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        # Două cereri simultane cu același email: a doua e oprită de UNIQUE.
+        db.rollback()
+        raise EmailAlreadyExistsError() from error
     db.refresh(user)
     return user
