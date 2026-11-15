@@ -101,6 +101,25 @@ class UserLogin(BaseModel):
 
     model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
 
+    email: EmailStr = Field(alias="email", max_length=150)
+    password: Annotated[str, StringConstraints(min_length=1)] = Field(alias="parola")
+
+
+class TokenResponse(BaseModel):
+    """Răspunsul API după autentificare."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    access_token: str = Field(alias="access_token", min_length=1)
+    token_type: str = Field(default="bearer", alias="token_type")
+    user: UserRead = Field(alias="user")
+
+
+class UserLogin(BaseModel):
+    """Datele trimise la autentificare."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
     email: EmailStr = Field(alias="email")
     password: str = Field(alias="parola")
 
