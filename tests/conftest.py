@@ -52,22 +52,35 @@ def empty_tables() -> None:
 
 
 @pytest.fixture
-def add_time_slot() -> Callable[[int], None]:
+def add_time_slot() -> Callable[..., int]:
     """Adaugă un interval în calendar pentru facilitatea cu id-ul dat.
 
-    Încă nu există endpoint pentru calendar, așa că intervalul se scrie direct
-    în baza de test.
+    Încă nu există endpoint pentru crearea intervalelor, așa că intervalul se
+    scrie direct în baza de test. Întoarce id-ul intervalului creat.
     """
 
-    def add(facility_id: int) -> None:
+    def add(
+        facility_id: int,
+        slot_date: str = "2026-12-01",
+        start_time: str = "10:00",
+        end_time: str = "11:00",
+        status: str = "free",
+    ) -> int:
         with engine.begin() as connection:
-            connection.execute(
+            return connection.execute(
                 text(
                     "INSERT INTO time_slot (facility_id, slot_date, start_time, "
-                    "end_time) VALUES (:id, '2026-12-01', '10:00', '11:00')"
+                    "end_time, status) VALUES (:facility_id, :slot_date, "
+                    ":start_time, :end_time, :status) RETURNING id"
                 ),
-                {"id": facility_id},
-            )
+                {
+                    "facility_id": facility_id,
+                    "slot_date": slot_date,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "status": status,
+                },
+            ).scalar_one()
 
     return add
 

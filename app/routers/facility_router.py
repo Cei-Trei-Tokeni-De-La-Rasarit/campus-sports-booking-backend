@@ -1,12 +1,15 @@
 """Endpoint-urile API pentru facilități (/facilitati)."""
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.facility import Facility
 from app.schemas.facility import FacilityData, FacilityRead
-from app.services import facility_service
+from app.schemas.time_slot import SlotRead
+from app.services import facility_service, time_slot_service
 
 router = APIRouter(prefix="/facilitati", tags=["Facilități"])
 
@@ -66,3 +69,21 @@ def delete_facility(
             "Dezactiveaz-o cu status = inactiva.",
         ) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{facility_id}/sloturi", response_model=list[SlotRead])
+def list_facility_slots(
+    start: date = Query(alias="de_la"),
+    end: date = Query(alias="pana_la"),
+    facility: Facility = Depends(get_existing_facility),
+    db: Session = Depends(get_db),
+) -> list[SlotRead]:
+    """Calendarul unei facilități: sloturile dintre două date, cu starea lor."""
+    try:
+        slots = time_slot_service.list_slots(db, facility.id, start, end)
+    except time_slot_service.InvalidPeriodError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Date invalide. {error}",
+        ) from error
+    return [SlotRead.from_model(slot) for slot in slots]
