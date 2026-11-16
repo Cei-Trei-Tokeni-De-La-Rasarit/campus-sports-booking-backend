@@ -19,6 +19,12 @@ FACILITY = {
 }
 
 
+@pytest.fixture(autouse=True)
+def authenticate_as_admin(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """Folosește un administrator pentru operațiile CRUD protejate."""
+    client.headers.update(admin_headers)
+
+
 def count_facilities() -> int:
     """Numărul de facilități din baza de test, indiferent de status."""
     with engine.connect() as connection:

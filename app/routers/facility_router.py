@@ -6,8 +6,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import require_admin, require_manager_or_admin
 from app.database import get_db
 from app.models.facility import Facility
+from app.models.user import User
 from app.schemas.facility import FacilityData, FacilityFilters, FacilityRead
 from app.schemas.time_slot import SlotRead
 from app.services import facility_service, time_slot_service
@@ -43,8 +45,12 @@ def get_facility(
 
 
 @router.post("", response_model=FacilityRead, status_code=status.HTTP_201_CREATED)
-def create_facility(data: FacilityData, db: Session = Depends(get_db)) -> FacilityRead:
-    """Adaugă o facilitate."""
+def create_facility(
+    data: FacilityData,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> FacilityRead:
+    """Adaugă o facilitate (doar administrator)."""
     return FacilityRead.from_model(facility_service.create_facility(db, data))
 
 
@@ -53,8 +59,9 @@ def update_facility(
     data: FacilityData,
     facility: Facility = Depends(get_existing_facility),
     db: Session = Depends(get_db),
+    _: User = Depends(require_manager_or_admin),
 ) -> FacilityRead:
-    """Editează o facilitate (pentru dezactivare se trimite status = inactiva)."""
+    """Editează o facilitate (administrator sau manager)."""
     return FacilityRead.from_model(facility_service.update_facility(db, facility, data))
 
 
@@ -62,8 +69,9 @@ def update_facility(
 def delete_facility(
     facility: Facility = Depends(get_existing_facility),
     db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ) -> Response:
-    """Șterge o facilitate care nu are intervale în calendar."""
+    """Șterge o facilitate care nu are intervale în calendar (doar administrator)."""
     try:
         facility_service.delete_facility(db, facility)
     except facility_service.FacilityHasSlotsError as error:

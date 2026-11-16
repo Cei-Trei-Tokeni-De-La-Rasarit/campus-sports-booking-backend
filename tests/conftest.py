@@ -114,3 +114,17 @@ def log_in(client: TestClient) -> Callable[..., tuple[int, dict[str, str]]]:
         return data["utilizator"]["id"], {"Authorization": f"Bearer {data['token']}"}
 
     return create_and_log_in
+
+
+@pytest.fixture
+def admin_headers(
+    client: TestClient, log_in: Callable[..., tuple[int, dict[str, str]]]
+) -> dict[str, str]:
+    """Autentifică un administrator pentru endpoint-urile protejate."""
+    user_id, headers = log_in("admin.facilities@student.usv.ro")
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE \"user\" SET role = 'administrator' WHERE id = :id"),
+            {"id": user_id},
+        )
+    return headers
