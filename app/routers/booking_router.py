@@ -32,6 +32,11 @@ def create_booking(
             status_code=status.HTTP_409_CONFLICT,
             detail="Facilitatea nu poate fi rezervată acum.",
         ) from error
+    except booking_service.SlotAlreadyStartedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Slotul a început deja și nu mai poate fi rezervat.",
+        ) from error
     except booking_service.SlotNotAvailableError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

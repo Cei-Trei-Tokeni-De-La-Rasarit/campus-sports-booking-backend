@@ -4,7 +4,7 @@ Câmpurile din cod sunt în engleză, ca în baza de date, iar în JSON apar
 numele din specificația OpenAPI, în română (prin alias).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -61,6 +61,7 @@ class BookingRead(BaseModel):
             id=booking.id,
             user_id=booking.user_id,
             slot=SlotRead.from_model(booking.slot),
-            created_at=booking.created_at,
+            # În bază e salvată în UTC, fără fus orar; îl adăugăm la răspuns.
+            created_at=booking.created_at.replace(tzinfo=timezone.utc),
             status=STATUS_FROM_DB[booking.status],
         )

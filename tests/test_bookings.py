@@ -2,13 +2,14 @@
 
 import threading
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.database import SessionLocal, engine
-from app.services import booking_service
+from app.services import booking_service, facility_service
 
 URL = "/rezervari"
 FACILITY = {
@@ -17,6 +18,16 @@ FACILITY = {
     "locatie": "Corp A",
     "capacitate": 4,
 }
+
+# „Acum” e fixat cu o zi înaintea sloturilor din teste (1 decembrie 2026),
+# ca testele să nu depindă de ziua în care rulează.
+NOW = datetime(2026, 11, 30, 12, 0)
+
+
+@pytest.fixture(autouse=True)
+def fixed_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Face ca „acum” să fie 30 noiembrie 2026, ora 12:00 (ora României)."""
+    monkeypatch.setattr(facility_service, "romania_now", lambda db: NOW)
 
 
 @pytest.fixture
@@ -87,7 +98,9 @@ def test_book_slot_returns_201_with_booking_data(
     assert data["id"] > 0
     assert data["utilizator_id"] == user_id
     assert data["stare"] == "confirmata"
-    assert data["data_crearii"]
+    created = datetime.fromisoformat(data["data_crearii"])
+    assert created.tzinfo is not None
+    assert abs(datetime.now(timezone.utc) - created) < timedelta(minutes=1)
     assert data["slot"] == {
         "id": slot_id,
         "facilitate_id": data["slot"]["facilitate_id"],
@@ -298,6 +311,43 @@ def test_book_slot_of_unavailable_facility_returns_409(
     assert response.status_code == 409
     assert response.json() == {"mesaj": "Facilitatea nu poate fi rezervată acum."}
     assert_nothing_booked(slot)
+
+
+@pytest.mark.parametrize(
+    ("slot_date", "start", "end"),
+    [
+        ("2026-11-29", "14:00", "15:00"),
+        ("2026-11-30", "10:00", "11:00"),
+        ("2026-11-30", "11:30", "12:30"),
+        ("2026-11-30", "12:00", "13:00"),
+    ],
+    ids=["ieri", "s-a-terminat-azi", "a-inceput", "incepe-acum"],
+)
+def test_book_slot_that_has_started_returns_409(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+    slot_date: str,
+    start: str,
+    end: str,
+) -> None:
+    slot = add_time_slot(create_facility(client), slot_date, start, end)
+
+    response = book(client, user[1], slot)
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "mesaj": "Slotul a început deja și nu mai poate fi rezervat."
+    }
+    assert_nothing_booked(slot)
+
+
+def test_book_slot_later_today_returns_201(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    slot = add_time_slot(create_facility(client), "2026-11-30", "12:01", "13:00")
+
+    assert book(client, user[1], slot).status_code == 201
 
 
 # Cereri în același timp
