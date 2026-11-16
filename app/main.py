@@ -25,7 +25,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in CORS_ORIGINS],
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type"],
+    # Authorization: frontend-ul trimite token-ul JWT (Bearer) în acest header.
+    allow_headers=["Content-Type", "Authorization"],
 )
 app.include_router(facility_router.router)
 app.include_router(auth.router)
