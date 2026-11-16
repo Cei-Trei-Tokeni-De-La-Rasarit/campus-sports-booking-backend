@@ -1,5 +1,7 @@
 """Logica aplicației pentru rezervări."""
 
+from datetime import datetime
+
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -37,6 +39,38 @@ class OverlappingBookingError(Exception):
 
 class TooManyBookingsError(Exception):
     """Utilizatorul are deja numărul maxim de rezervări active."""
+
+
+def public_status(booking: Booking, now: datetime) -> str:
+    """Calculează starea afișată a unei rezervări."""
+    if booking.status == "cancelled":
+        return "anulata"
+    if (booking.slot.slot_date, booking.slot.end_time) <= (now.date(), now.time()):
+        return "finalizata"
+    return "confirmata"
+
+
+def list_bookings(
+    db: Session, user_id: int, requested_status: str | None = None
+) -> list[Booking]:
+    """Întoarce rezervările utilizatorului, ordonate după slot."""
+    bookings = list(
+        db.scalars(
+            select(Booking)
+            .join(TimeSlot, Booking.slot_id == TimeSlot.id)
+            .where(Booking.user_id == user_id)
+            .order_by(TimeSlot.slot_date, TimeSlot.start_time)
+        )
+    )
+    if requested_status is None:
+        return bookings
+
+    now = facility_service.romania_now(db)
+    return [
+        booking
+        for booking in bookings
+        if public_status(booking, now) == requested_status
+    ]
 
 
 def has_started(db: Session, slot: TimeSlot) -> bool:

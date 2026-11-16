@@ -376,6 +376,76 @@ def add_booking(user_id: int, slot: int, status: str = "confirmed") -> None:
         )
 
 
+def list_bookings(client: TestClient, headers: dict, **filters: str):
+    """Cere rezervările utilizatorului autentificat."""
+    return client.get("/rezervari", headers=headers, params=filters)
+
+
+def test_list_bookings_is_empty_for_new_user(
+    client: TestClient, user: tuple[int, dict]
+) -> None:
+    response = list_bookings(client, user[1])
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_bookings_returns_only_the_current_users_bookings(
+    client: TestClient,
+    log_in: Callable[..., tuple[int, dict]],
+    add_time_slot: Callable[..., int],
+) -> None:
+    user_id, headers = log_in("primul@student.usv.ro")
+    _, other_headers = log_in("al.doilea@student.usv.ro")
+    first_slot = add_time_slot(create_facility(client), TOMORROW, "10:00", "11:00")
+    second_slot = add_time_slot(create_facility(client), TOMORROW, "12:00", "13:00")
+    book(client, headers, first_slot)
+    book(client, other_headers, second_slot)
+
+    response = list_bookings(client, headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["utilizator_id"] == user_id
+    assert response.json()[0]["slot"]["id"] == first_slot
+
+
+@pytest.mark.parametrize("requested_status", ["confirmata", "anulata", "finalizata"])
+def test_list_bookings_filters_by_status(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+    requested_status: str,
+) -> None:
+    user_id, headers = user
+    future_slot = add_time_slot(create_facility(client), TOMORROW, "10:00", "11:00")
+    past_slot = add_time_slot(create_facility(client), "2026-11-29", "10:00", "11:00")
+    cancelled_slot = add_time_slot(create_facility(client), TOMORROW, "12:00", "13:00")
+    add_booking(user_id, future_slot)
+    add_booking(user_id, past_slot)
+    add_booking(user_id, cancelled_slot, "cancelled")
+
+    response = list_bookings(client, headers, stare=requested_status)
+
+    assert response.status_code == 200
+    assert {booking["stare"] for booking in response.json()} == {requested_status}
+
+
+def test_list_bookings_without_token_returns_401(client: TestClient) -> None:
+    response = client.get("/rezervari", headers={})
+
+    assert response.status_code == 401
+    assert response.json() == {"mesaj": "Lipsește token-ul de autentificare."}
+
+
+def test_list_bookings_with_invalid_status_returns_400(
+    client: TestClient, user: tuple[int, dict]
+) -> None:
+    response = list_bookings(client, user[1], stare="gresita")
+
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+
+
 OVERLAP_MESSAGE = {"mesaj": "Ai deja o rezervare care se suprapune cu acest interval."}
 
 
