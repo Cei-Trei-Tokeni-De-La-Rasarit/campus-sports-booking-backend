@@ -37,6 +37,22 @@ def list_facilities(
     return [FacilityRead.from_model(f) for f in facilities]
 
 
+# Calea fixă „/toate” stă înaintea lui „/{facility_id}”, ca să nu fie citită
+# drept un id.
+@router.get("/toate", response_model=list[FacilityRead])
+def list_all_facilities(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager_or_admin),
+) -> list[FacilityRead]:
+    """Toate facilitățile, inclusiv cele în mentenanță sau inactive.
+
+    Pagina de administrare are nevoie de ele ca să le poată reactiva; catalogul
+    public le ascunde. Doar pentru manager și administrator.
+    """
+    facilities = facility_service.list_all_facilities(db)
+    return [FacilityRead.from_model(facility) for facility in facilities]
+
+
 @router.get("/{facility_id}", response_model=FacilityRead)
 def get_facility(
     facility: Facility = Depends(get_existing_facility),
