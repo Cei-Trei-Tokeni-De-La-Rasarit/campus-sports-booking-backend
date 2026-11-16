@@ -11,8 +11,9 @@ from app.database import get_db
 from app.models.facility import Facility
 from app.models.user import User
 from app.schemas.facility import FacilityData, FacilityFilters, FacilityRead
+from app.schemas.regulation import RegulationRead
 from app.schemas.time_slot import SlotRead
-from app.services import facility_service, time_slot_service
+from app.services import facility_service, regulation_service, time_slot_service
 
 router = APIRouter(prefix="/facilitati", tags=["Facilități"])
 
@@ -42,6 +43,21 @@ def get_facility(
 ) -> FacilityRead:
     """Detaliile unei facilități."""
     return FacilityRead.from_model(facility)
+
+
+@router.get("/{facility_id}/regulament", response_model=RegulationRead)
+def get_facility_regulation(
+    facility: Facility = Depends(get_existing_facility),
+    db: Session = Depends(get_db),
+) -> RegulationRead:
+    """Întoarce regulamentul public al unei facilități."""
+    regulation = regulation_service.get_regulation(db, facility.id)
+    if regulation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Facilitatea nu are regulament.",
+        )
+    return RegulationRead.from_model(regulation)
 
 
 @router.post("", response_model=FacilityRead, status_code=status.HTTP_201_CREATED)
