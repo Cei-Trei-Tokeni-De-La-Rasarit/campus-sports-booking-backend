@@ -216,3 +216,44 @@ def test_reading_facilities_needs_no_token(
         client.get(f"/facilitati/{facility_id}/sloturi", params=params).status_code
         == 200
     )
+
+
+# Lista completă pentru administrare: GET /facilitati/toate.
+
+
+def test_list_all_facilities_without_token_returns_401(client: TestClient) -> None:
+    response = client.get("/facilitati/toate")
+
+    assert response.status_code == 401
+
+
+def test_client_cannot_list_all_facilities(
+    client: TestClient, headers_for: Callable
+) -> None:
+    response = client.get("/facilitati/toate", headers=headers_for("client"))
+
+    assert response.status_code == 403
+    assert response.json() == FORBIDDEN
+
+
+@pytest.mark.parametrize("role", ["manager", "administrator"])
+def test_list_all_facilities_includes_inactive_ones(
+    client: TestClient, headers_for: Callable, role: str
+) -> None:
+    admin = headers_for("administrator")
+    for status in ["activa", "mentenanta", "inactiva"]:
+        response = client.post(
+            "/facilitati", json={**FACILITY, "status": status}, headers=admin
+        )
+        assert response.status_code == 201
+
+    response = client.get("/facilitati/toate", headers=headers_for(role))
+
+    assert response.status_code == 200
+    assert [facility["status"] for facility in response.json()] == [
+        "activa",
+        "mentenanta",
+        "inactiva",
+    ]
+    # Catalogul public rămâne doar cu sălile active.
+    assert len(client.get("/facilitati").json()) == 1

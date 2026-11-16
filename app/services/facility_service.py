@@ -56,6 +56,11 @@ def list_facilities(db: Session, filters: FacilityFilters) -> list[Facility]:
     return list(db.scalars(query.order_by(Facility.id)))
 
 
+def list_all_facilities(db: Session) -> list[Facility]:
+    """Întoarce toate facilitățile, indiferent de status (pentru administrare)."""
+    return list(db.scalars(select(Facility).order_by(Facility.id)))
+
+
 def get_facility(db: Session, facility_id: int) -> Facility | None:
     """Întoarce facilitatea cu id-ul dat sau None dacă nu există."""
     # Un id în afara intervalului unei coloane INT nu poate exista în baza de
