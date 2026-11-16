@@ -22,6 +22,14 @@ FACILITY = {
 # „Acum” e fixat cu o zi înaintea sloturilor din teste (1 decembrie 2026),
 # ca testele să nu depindă de ziua în care rulează.
 NOW = datetime(2026, 11, 30, 12, 0)
+ADMIN_HEADERS: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def set_admin_headers(admin_headers: dict[str, str]) -> None:
+    """Pune la dispoziția helperelor de setup un administrator autentificat."""
+    ADMIN_HEADERS.clear()
+    ADMIN_HEADERS.update(admin_headers)
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +52,9 @@ def slot_id(client: TestClient, add_time_slot: Callable[..., int]) -> int:
 
 def create_facility(client: TestClient, **changes: object) -> int:
     """Adaugă o facilitate prin API și întoarce id-ul ei."""
-    response = client.post("/facilitati", json={**FACILITY, **changes})
+    response = client.post(
+        "/facilitati", json={**FACILITY, **changes}, headers=ADMIN_HEADERS
+    )
     assert response.status_code == 201
     return response.json()["id"]
 

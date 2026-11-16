@@ -11,6 +11,14 @@ FACILITY = {
     "locatie": "Corp A",
     "capacitate": 4,
 }
+
+
+@pytest.fixture(autouse=True)
+def authenticate_as_admin(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """Folosește un administrator pentru crearea facilităților de test."""
+    client.headers.update(admin_headers)
+
+
 # O săptămână din decembrie 2026, de luni până duminică.
 WEEK = {"de_la": "2026-11-30", "pana_la": "2026-12-06"}
 
