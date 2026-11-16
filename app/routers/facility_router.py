@@ -61,7 +61,10 @@ def update_facility(
     db: Session = Depends(get_db),
     _: User = Depends(require_manager_or_admin),
 ) -> FacilityRead:
-    """Editează o facilitate (administrator sau manager)."""
+    """Editează o facilitate (manager sau administrator).
+
+    Pentru dezactivare se trimite status = inactiva.
+    """
     return FacilityRead.from_model(facility_service.update_facility(db, facility, data))
 
 
