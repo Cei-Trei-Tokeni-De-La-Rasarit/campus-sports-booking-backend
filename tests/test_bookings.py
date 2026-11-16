@@ -350,32 +350,228 @@ def test_book_slot_later_today_returns_201(
     assert book(client, user[1], slot).status_code == 201
 
 
+# Rezervări suprapuse și numărul maxim
+TOMORROW = "2026-12-01"
+
+
+def add_booking(user_id: int, slot: int, status: str = "confirmed") -> None:
+    """Scrie o rezervare direct în baza de test (de exemplu, una anulată)."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO booking (user_id, slot_id, status) "
+                "VALUES (:user_id, :slot_id, :status)"
+            ),
+            {"user_id": user_id, "slot_id": slot, "status": status},
+        )
+
+
+OVERLAP_MESSAGE = {"mesaj": "Ai deja o rezervare care se suprapune cu acest interval."}
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("10:00", "11:00"), ("10:30", "11:30"), ("09:30", "10:30"), ("10:15", "10:45")],
+    ids=["aceeasi-ora", "incepe-in-timpul", "se-termina-in-timpul", "inclus"],
+)
+def test_book_overlapping_slot_at_other_facility_returns_409(
+    client: TestClient,
+    user: tuple[int, dict],
+    slot_id: int,
+    add_time_slot: Callable[..., int],
+    start: str,
+    end: str,
+) -> None:
+    assert book(client, user[1], slot_id).status_code == 201
+    other = add_time_slot(create_facility(client), TOMORROW, start, end)
+
+    response = book(client, user[1], other)
+
+    assert response.status_code == 409
+    assert response.json() == OVERLAP_MESSAGE
+    assert count_bookings() == 1
+    assert slot_status(other) == "free"
+
+
+@pytest.mark.parametrize(
+    ("slot_date", "start", "end"),
+    [
+        (TOMORROW, "11:00", "12:00"),
+        (TOMORROW, "09:00", "10:00"),
+        ("2026-12-02", "10:00", "11:00"),
+    ],
+    ids=["imediat-dupa", "imediat-inainte", "alta-zi"],
+)
+def test_book_slot_next_to_own_booking_returns_201(
+    client: TestClient,
+    user: tuple[int, dict],
+    slot_id: int,
+    add_time_slot: Callable[..., int],
+    slot_date: str,
+    start: str,
+    end: str,
+) -> None:
+    book(client, user[1], slot_id)
+    other = add_time_slot(create_facility(client), slot_date, start, end)
+
+    assert book(client, user[1], other).status_code == 201
+
+
+def test_cancelled_booking_does_not_block_same_interval(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+) -> None:
+    user_id, headers = user
+    old = add_time_slot(create_facility(client), TOMORROW, "10:00", "11:00")
+    add_booking(user_id, old, "cancelled")
+    other = add_time_slot(create_facility(client), TOMORROW, "10:00", "11:00")
+
+    assert book(client, headers, other).status_code == 201
+
+
+def test_other_users_booking_does_not_block_same_interval(
+    client: TestClient,
+    log_in: Callable[..., tuple[int, dict]],
+    slot_id: int,
+    add_time_slot: Callable[..., int],
+) -> None:
+    _, first = log_in("primul@student.usv.ro")
+    _, second = log_in("al.doilea@student.usv.ro")
+    book(client, first, slot_id)
+    other = add_time_slot(create_facility(client), TOMORROW, "10:00", "11:00")
+
+    assert book(client, second, other).status_code == 201
+
+
+def add_free_slots(client: TestClient, add_time_slot: Callable, count: int) -> list:
+    """Adaugă sloturi libere mâine, la ore diferite, care nu se suprapun."""
+    facility = create_facility(client)
+    return [
+        add_time_slot(facility, TOMORROW, f"{8 + i:02d}:00", f"{8 + i:02d}:30")
+        for i in range(count)
+    ]
+
+
+def test_fourth_active_booking_returns_409(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    *first_three, fourth = add_free_slots(client, add_time_slot, 4)
+    for slot in first_three:
+        assert book(client, user[1], slot).status_code == 201
+
+    response = book(client, user[1], fourth)
+
+    assert response.status_code == 409
+    assert response.json() == {"mesaj": "Poți avea cel mult 3 rezervări active."}
+    assert count_bookings() == 3
+    assert slot_status(fourth) == "free"
+
+
+@pytest.mark.parametrize(
+    ("slot_date", "start", "end", "status"),
+    [
+        ("2026-11-29", "10:00", "11:00", "confirmed"),
+        ("2026-11-30", "11:00", "12:30", "confirmed"),
+        (TOMORROW, "18:00", "19:00", "cancelled"),
+    ],
+    ids=["ieri", "a-inceput-azi", "anulata"],
+)
+def test_past_or_cancelled_bookings_do_not_count_to_maximum(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+    slot_date: str,
+    start: str,
+    end: str,
+    status: str,
+) -> None:
+    user_id, headers = user
+    old = add_time_slot(create_facility(client), slot_date, start, end, "booked")
+    add_booking(user_id, old, status)
+
+    for slot in add_free_slots(client, add_time_slot, 3):
+        assert book(client, headers, slot).status_code == 201
+
+
+def test_maximum_is_per_user(
+    client: TestClient,
+    log_in: Callable[..., tuple[int, dict]],
+    add_time_slot: Callable[..., int],
+) -> None:
+    _, first = log_in("primul@student.usv.ro")
+    _, second = log_in("al.doilea@student.usv.ro")
+    slots = add_free_slots(client, add_time_slot, 4)
+    for slot in slots[:3]:
+        book(client, first, slot)
+
+    assert book(client, second, slots[3]).status_code == 201
+
+
 # Cereri în același timp
 
 
-def test_simultaneous_bookings_of_same_slot_only_one_succeeds(
-    user: tuple[int, dict], slot_id: int
-) -> None:
-    user_id, _ = user
-    requests = 5
-    start_together = threading.Barrier(requests)
-    results: list[str] = []
+def run_together(requests: list[Callable[[], None]]) -> None:
+    """Pornește cererile date în același moment, pe fire de execuție separate."""
+    start_together = threading.Barrier(len(requests))
 
-    def try_to_book() -> None:
-        with SessionLocal() as db:
-            start_together.wait()
-            try:
-                booking_service.create_booking(db, user_id, slot_id)
-                results.append("rezervat")
-            except booking_service.SlotNotAvailableError:
-                results.append("ocupat")
+    def run(request: Callable[[], None]) -> None:
+        start_together.wait()
+        request()
 
-    threads = [threading.Thread(target=try_to_book) for _ in range(requests)]
+    threads = [threading.Thread(target=run, args=(r,)) for r in requests]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
 
-    assert sorted(results) == ["ocupat"] * (requests - 1) + ["rezervat"]
+
+def booking_attempt(user_id: int, slot: int, results: list[str]) -> Callable:
+    """O încercare de rezervare direct prin serviciu, cu sesiunea ei."""
+
+    def attempt() -> None:
+        with SessionLocal() as db:
+            try:
+                booking_service.create_booking(db, user_id, slot)
+                results.append("rezervat")
+            except (
+                booking_service.SlotNotAvailableError,
+                booking_service.TooManyBookingsError,
+            ):
+                results.append("refuzat")
+
+    return attempt
+
+
+def test_simultaneous_bookings_of_same_slot_only_one_succeeds(
+    log_in: Callable[..., tuple[int, dict]], slot_id: int
+) -> None:
+    users = [log_in(f"student{i}@student.usv.ro")[0] for i in range(5)]
+    results: list[str] = []
+
+    run_together([booking_attempt(u, slot_id, results) for u in users])
+
+    assert sorted(results) == ["refuzat"] * 4 + ["rezervat"]
     assert count_bookings() == 1
     assert slot_status(slot_id) == "booked"
+
+
+def test_simultaneous_bookings_of_same_user_respect_the_maximum(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    user_id, headers = user
+    facility = create_facility(client)
+    for hour in ("08", "09"):
+        slot = add_time_slot(facility, TOMORROW, f"{hour}:00", f"{hour}:30")
+        assert book(client, headers, slot).status_code == 201
+    free_slots = [
+        add_time_slot(facility, TOMORROW, f"{hour}:00", f"{hour}:30")
+        for hour in ("14", "15", "16", "17")
+    ]
+    results: list[str] = []
+
+    run_together([booking_attempt(user_id, s, results) for s in free_slots])
+
+    # Mai era loc pentru o singură rezervare (maximul e 3).
+    assert sorted(results) == ["refuzat"] * 3 + ["rezervat"]
+    assert count_bookings() == 3

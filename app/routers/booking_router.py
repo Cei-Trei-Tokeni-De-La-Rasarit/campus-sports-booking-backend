@@ -37,6 +37,17 @@ def create_booking(
             status_code=status.HTTP_409_CONFLICT,
             detail="Slotul a început deja și nu mai poate fi rezervat.",
         ) from error
+    except booking_service.OverlappingBookingError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ai deja o rezervare care se suprapune cu acest interval.",
+        ) from error
+    except booking_service.TooManyBookingsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Poți avea cel mult "
+            f"{booking_service.MAX_ACTIVE_BOOKINGS} rezervări active.",
+        ) from error
     except booking_service.SlotNotAvailableError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
