@@ -1,22 +1,59 @@
 """Logica aplicației pentru facilități."""
 
-from sqlalchemy import select, text
+from datetime import datetime
+
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.models.facility import Facility
-from app.schemas.facility import FacilityData
+from app.models.time_slot import TimeSlot
+from app.schemas.facility import FacilityData, FacilityFilters
 
 # Cea mai mare valoare pe care o poate stoca o coloană INT din PostgreSQL.
 MAX_DB_ID = 2_147_483_647
+
+# „Azi” înseamnă ziua din România, indiferent unde rulează serverul.
+ROMANIA_TIMEZONE = "Europe/Bucharest"
 
 
 class FacilityHasSlotsError(Exception):
     """Facilitatea are intervale în calendar și nu poate fi ștearsă."""
 
 
-def list_facilities(db: Session) -> list[Facility]:
-    """Întoarce toate facilitățile, în ordinea în care au fost adăugate."""
-    return list(db.scalars(select(Facility).order_by(Facility.id)))
+def romania_now(db: Session) -> datetime:
+    """Data și ora de acum în România, fără fus orar atașat.
+
+    Ora se ia de la PostgreSQL, care are tabelul fusurilor orare inclus;
+    așa nu e nevoie de un pachet în plus în Python.
+    """
+    return db.scalar(select(func.timezone(ROMANIA_TIMEZONE, func.now())))
+
+
+def list_facilities(db: Session, filters: FacilityFilters) -> list[Facility]:
+    """Întoarce catalogul: facilitățile active care respectă filtrele date.
+
+    Facilitățile în mentenanță sau inactive nu se pot rezerva, deci nu apar
+    în catalog. Ordinea este cea în care au fost adăugate.
+    """
+    query = select(Facility).where(Facility.status == "active")
+    if filters.search is not None:
+        # autoescape: „%” și „_” din text se caută ca atare, nu ca șabloane SQL.
+        query = query.where(Facility.name.icontains(filters.search, autoescape=True))
+    if filters.sport is not None:
+        query = query.where(func.lower(Facility.sport) == filters.sport.lower())
+    if filters.min_capacity is not None:
+        query = query.where(Facility.capacity >= filters.min_capacity)
+    if filters.available_today:
+        now = romania_now(db)
+        # Un interval liber azi, care nu a început încă (se mai poate rezerva).
+        free_slot_today = select(TimeSlot.id).where(
+            TimeSlot.facility_id == Facility.id,
+            TimeSlot.status == "free",
+            TimeSlot.slot_date == now.date(),
+            TimeSlot.start_time > now.time(),
+        )
+        query = query.where(free_slot_today.exists())
+    return list(db.scalars(query.order_by(Facility.id)))
 
 
 def get_facility(db: Session, facility_id: int) -> Facility | None:

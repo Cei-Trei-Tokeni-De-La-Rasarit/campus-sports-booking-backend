@@ -73,3 +73,26 @@ class FacilityRead(FacilityData):
             schedule=facility.schedule,
             status=STATUS_FROM_DB[facility.status],
         )
+
+
+class FacilityFilters(BaseModel):
+    """Filtrele pentru catalogul facilităților, primite în adresă (query)."""
+
+    model_config = ConfigDict(
+        validate_by_name=True, validate_by_alias=True, str_strip_whitespace=True
+    )
+
+    # Un filtru lipsă sau gol înseamnă „fără filtru”.
+    search: str | None = Field(default=None, alias="cautare", max_length=100)
+    sport: str | None = Field(default=None, alias="sport", max_length=50)
+    min_capacity: int | None = Field(
+        default=None, alias="capacitate_min", ge=1, le=MAX_CAPACITY
+    )
+    # true: doar facilitățile care mai au azi cel puțin un interval liber.
+    available_today: bool = Field(default=False, alias="disponibile_azi")
+
+    @field_validator("search", "sport")
+    @classmethod
+    def empty_text_to_none(cls, value: str | None) -> str | None:
+        """Un text gol sau doar din spații nu filtrează nimic."""
+        return value or None
