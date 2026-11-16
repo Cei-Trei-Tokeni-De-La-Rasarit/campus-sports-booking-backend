@@ -91,3 +91,26 @@ def client() -> Iterator[TestClient]:
     """Clientul HTTP care trimite cereri către aplicație."""
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def log_in(client: TestClient) -> Callable[..., tuple[int, dict[str, str]]]:
+    """Creează un cont prin API, se autentifică și întoarce id-ul și header-ul.
+
+    Header-ul `Authorization: Bearer <token>` se trimite la endpoint-urile
+    care cer autentificare.
+    """
+
+    def create_and_log_in(
+        email: str = "andrei.popescu@student.usv.ro",
+    ) -> tuple[int, dict[str, str]]:
+        account = {"nume": "Andrei Popescu", "email": email, "parola": "parola-sigura"}
+        assert client.post("/auth/inregistrare", json=account).status_code == 201
+        response = client.post(
+            "/auth/autentificare", json={"email": email, "parola": account["parola"]}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        return data["utilizator"]["id"], {"Authorization": f"Bearer {data['token']}"}
+
+    return create_and_log_in
