@@ -1,15 +1,32 @@
 """Endpoint-urile API pentru rezervări (/rezervari)."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
 from app.routers.auth import get_current_user
-from app.schemas.booking import BookingCreate, BookingRead
-from app.services import booking_service
+from app.schemas.booking import BookingCreate, BookingRead, BookingStatus
+from app.services import booking_service, facility_service
 
 router = APIRouter(prefix="/rezervari", tags=["Rezervări"])
+
+
+@router.get("", response_model=list[BookingRead])
+def list_bookings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    requested_status: Annotated[BookingStatus | None, Query(alias="stare")] = None,
+) -> list[BookingRead]:
+    """Întoarce rezervările utilizatorului autentificat."""
+    now = facility_service.romania_now(db)
+    bookings = booking_service.list_bookings(db, current_user.id, requested_status)
+    return [
+        BookingRead.from_model(booking, booking_service.public_status(booking, now))
+        for booking in bookings
+    ]
 
 
 @router.post("", response_model=BookingRead, status_code=status.HTTP_201_CREATED)

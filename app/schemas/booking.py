@@ -55,7 +55,9 @@ class BookingRead(BaseModel):
     status: BookingStatus = Field(alias="stare")
 
     @classmethod
-    def from_model(cls, booking: Booking) -> "BookingRead":
+    def from_model(
+        cls, booking: Booking, public_status: BookingStatus | None = None
+    ) -> "BookingRead":
         """Construiește răspunsul API pornind de la un rând din baza de date."""
         return cls(
             id=booking.id,
@@ -63,5 +65,5 @@ class BookingRead(BaseModel):
             slot=SlotRead.from_model(booking.slot),
             # În bază e salvată în UTC, fără fus orar; îl adăugăm la răspuns.
             created_at=booking.created_at.replace(tzinfo=timezone.utc),
-            status=STATUS_FROM_DB[booking.status],
+            status=public_status or STATUS_FROM_DB[booking.status],
         )
