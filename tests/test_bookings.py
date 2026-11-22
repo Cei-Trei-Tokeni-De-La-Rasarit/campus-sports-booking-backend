@@ -655,3 +655,286 @@ def test_simultaneous_bookings_of_same_user_respect_the_maximum(
     # Mai era loc pentru o singură rezervare (maximul e 3).
     assert sorted(results) == ["refuzat"] * 3 + ["rezervat"]
     assert count_bookings() == 3
+
+
+# Anularea unei rezervări (DELETE /rezervari/{id})
+# „Acum” e 30 noiembrie 2026, ora 12:00, deci limita de 24 de ore cade pe
+# 1 decembrie, ora 12:00.
+
+
+def cancel(client: TestClient, headers: dict, booking: object):
+    """Trimite cererea de anulare pentru rezervarea dată."""
+    return client.delete(f"{URL}/{booking}", headers=headers)
+
+
+def booking_status(booking: int) -> str:
+    """Starea rezervării din baza de test."""
+    with engine.connect() as connection:
+        return connection.scalar(
+            text("SELECT status FROM booking WHERE id = :id"), {"id": booking}
+        )
+
+
+def book_at(
+    client: TestClient,
+    headers: dict,
+    add_time_slot: Callable[..., int],
+    start: str,
+    day: str = TOMORROW,
+) -> tuple[int, int]:
+    """Rezervă un slot de o oră care începe la ora dată.
+
+    Întoarce id-ul rezervării și id-ul slotului.
+    """
+    hour, minute = (int(part) for part in start.split(":"))
+    end = f"{hour + 1:02d}:{minute:02d}"
+    slot = add_time_slot(create_facility(client), day, start, end)
+    response = book(client, headers, slot)
+    assert response.status_code == 201
+    return response.json()["id"], slot
+
+
+def assert_not_cancelled(booking: int, slot: int) -> None:
+    """Verifică că rezervarea a rămas confirmată și slotul rezervat."""
+    assert booking_status(booking) == "confirmed"
+    assert slot_status(slot) == "booked"
+
+
+def test_cancel_booking_returns_204_and_frees_the_slot(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, "18:00")
+
+    response = cancel(client, user[1], booking)
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert booking_status(booking) == "cancelled"
+    assert slot_status(slot) == "free"
+
+
+def test_cancelled_booking_is_listed_as_cancelled(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    booking, _ = book_at(client, user[1], add_time_slot, "18:00")
+
+    cancel(client, user[1], booking)
+
+    bookings = list_bookings(client, user[1]).json()
+    assert [(b["id"], b["stare"]) for b in bookings] == [(booking, "anulata")]
+    assert bookings[0]["slot"]["stare"] == "liber"
+
+
+def test_cancelled_slot_can_be_booked_by_someone_else(
+    client: TestClient,
+    log_in: Callable[..., tuple[int, dict]],
+    add_time_slot: Callable[..., int],
+) -> None:
+    _, headers = log_in("primul@student.usv.ro")
+    _, other_headers = log_in("al.doilea@student.usv.ro")
+    booking, slot = book_at(client, headers, add_time_slot, "18:00")
+
+    cancel(client, headers, booking)
+
+    assert book(client, other_headers, slot).status_code == 201
+    assert slot_status(slot) == "booked"
+
+
+def test_user_can_book_again_the_slot_they_cancelled(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, "18:00")
+    cancel(client, user[1], booking)
+
+    response = book(client, user[1], slot)
+
+    assert response.status_code == 201
+    assert response.json()["id"] != booking
+
+
+def test_cancelled_booking_frees_a_place_under_the_maximum(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    bookings = [
+        book_at(client, user[1], add_time_slot, start)[0]
+        for start in ("14:00", "16:00", "18:00")
+    ]
+    fourth_slot = add_time_slot(create_facility(client), "2026-12-02", "10:00", "11:00")
+    assert book(client, user[1], fourth_slot).status_code == 409
+
+    cancel(client, user[1], bookings[0])
+
+    assert book(client, user[1], fourth_slot).status_code == 201
+
+
+def test_cancel_exactly_24_hours_before_returns_204(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, "12:00")
+
+    assert cancel(client, user[1], booking).status_code == 204
+    assert slot_status(slot) == "free"
+
+
+@pytest.mark.parametrize(
+    ("day", "start"),
+    [
+        (TOMORROW, "11:59"),
+        (TOMORROW, "10:00"),
+        ("2026-11-30", "18:00"),
+    ],
+    ids=["un-minut-sub-24-de-ore", "maine-dimineata", "azi"],
+)
+def test_cancel_less_than_24_hours_before_returns_400(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+    day: str,
+    start: str,
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, start, day)
+
+    response = cancel(client, user[1], booking)
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "mesaj": "Rezervarea se poate anula cu cel puțin 24 de ore înainte "
+        "de începutul intervalului."
+    }
+    assert_not_cancelled(booking, slot)
+
+
+def test_cancel_finished_booking_returns_400(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    slot = add_time_slot(create_facility(client), "2026-11-29", "10:00", "11:00")
+    add_booking(user[0], slot)
+    booking = list_bookings(client, user[1]).json()[0]["id"]
+
+    response = cancel(client, user[1], booking)
+
+    assert response.status_code == 400
+    assert booking_status(booking) == "confirmed"
+
+
+def test_cancel_booking_twice_returns_409(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    booking, _ = book_at(client, user[1], add_time_slot, "18:00")
+    assert cancel(client, user[1], booking).status_code == 204
+
+    response = cancel(client, user[1], booking)
+
+    assert response.status_code == 409
+    assert response.json() == {"mesaj": "Rezervarea este deja anulată."}
+
+
+def test_cancel_other_users_booking_returns_404(
+    client: TestClient,
+    log_in: Callable[..., tuple[int, dict]],
+    add_time_slot: Callable[..., int],
+) -> None:
+    _, owner_headers = log_in("primul@student.usv.ro")
+    _, other_headers = log_in("al.doilea@student.usv.ro")
+    booking, slot = book_at(client, owner_headers, add_time_slot, "18:00")
+
+    response = cancel(client, other_headers, booking)
+
+    # Același răspuns ca pentru o rezervare inexistentă.
+    assert response.status_code == 404
+    assert response.json() == {"mesaj": "Rezervarea nu există."}
+    assert_not_cancelled(booking, slot)
+
+
+@pytest.mark.parametrize("booking", [999, 0, -1, 2**40])
+def test_cancel_missing_booking_returns_404(
+    client: TestClient, user: tuple[int, dict], booking: int
+) -> None:
+    response = cancel(client, user[1], booking)
+
+    assert response.status_code == 404
+    assert response.json() == {"mesaj": "Rezervarea nu există."}
+
+
+@pytest.mark.parametrize("booking", ["abc", "1.5", "%20"])
+def test_cancel_with_invalid_id_returns_400(
+    client: TestClient, user: tuple[int, dict], booking: str
+) -> None:
+    response = cancel(client, user[1], booking)
+
+    assert response.status_code == 400
+    assert response.json()["mesaj"].startswith("Date invalide.")
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"Authorization": "Bearer token-inventat"}],
+    ids=["fara-token", "token-gresit"],
+)
+def test_cancel_without_valid_token_returns_401(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+    headers: dict,
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, "18:00")
+
+    response = cancel(client, headers, booking)
+
+    assert response.status_code == 401
+    assert_not_cancelled(booking, slot)
+
+
+def test_cancel_keeps_slot_blocked_for_maintenance(
+    client: TestClient, user: tuple[int, dict], add_time_slot: Callable[..., int]
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, "18:00")
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE time_slot SET status = 'blocked' WHERE id = :id"),
+            {"id": slot},
+        )
+
+    assert cancel(client, user[1], booking).status_code == 204
+    assert booking_status(booking) == "cancelled"
+    assert slot_status(slot) == "blocked"
+
+
+def cancel_attempt(user_id: int, booking: int, results: list[str]) -> Callable:
+    """O încercare de anulare direct prin serviciu, cu sesiunea ei."""
+
+    def attempt() -> None:
+        with SessionLocal() as db:
+            try:
+                booking_service.cancel_booking(db, user_id, booking)
+                results.append("anulat")
+            except booking_service.BookingAlreadyCancelledError:
+                results.append("refuzat")
+
+    return attempt
+
+
+def test_simultaneous_cancellations_only_one_succeeds(
+    client: TestClient,
+    user: tuple[int, dict],
+    add_time_slot: Callable[..., int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    booking, slot = book_at(client, user[1], add_time_slot, "18:00")
+    results: list[str] = []
+    # Toate cele 5 anulări trec de verificări (rezervarea e încă confirmată)
+    # și se așteaptă una pe alta înainte de modificare, ca să ajungă în baza
+    # de date exact în același timp.
+    all_checked = threading.Barrier(5)
+
+    def now_after_all_checked(db: object) -> datetime:
+        all_checked.wait()
+        return NOW
+
+    monkeypatch.setattr(facility_service, "romania_now", now_after_all_checked)
+
+    run_together([cancel_attempt(user[0], booking, results) for _ in range(5)])
+
+    assert sorted(results) == ["anulat"] + ["refuzat"] * 4
+    assert booking_status(booking) == "cancelled"
+    assert slot_status(slot) == "free"
