@@ -13,6 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import engine
 from app.routers import auth, booking_router, facility_router
+from app.validation_messages import describe_errors
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,9 @@ def handle_http_error(_request: Request, error: StarletteHTTPException) -> JSONR
 def handle_validation_error(
     _request: Request, error: RequestValidationError
 ) -> JSONResponse:
-    """Datele greșite primesc 400, ca în specificația API."""
-    problems = [
-        f"{'.'.join(str(part) for part in item['loc'][1:])}: {item['msg']}"
-        for item in error.errors()
-    ]
+    """Datele greșite primesc 400, ca în specificația API, cu mesajul în română."""
     return JSONResponse(
-        status_code=400, content={"mesaj": "Date invalide. " + "; ".join(problems)}
+        status_code=400, content={"mesaj": describe_errors(list(error.errors()))}
     )
 
 
