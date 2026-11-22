@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -71,3 +71,30 @@ def create_booking(
             detail="Slotul nu mai este liber.",
         ) from error
     return BookingRead.from_model(booking)
+
+
+@router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_booking(
+    booking_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Anulează o rezervare a utilizatorului autentificat."""
+    try:
+        booking_service.cancel_booking(db, current_user.id, booking_id)
+    except booking_service.BookingNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Rezervarea nu există."
+        ) from error
+    except booking_service.BookingAlreadyCancelledError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Rezervarea este deja anulată.",
+        ) from error
+    except booking_service.CancellationTooLateError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rezervarea se poate anula cu cel puțin 24 de ore înainte "
+            "de începutul intervalului.",
+        ) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

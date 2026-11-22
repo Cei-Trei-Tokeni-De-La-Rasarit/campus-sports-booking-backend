@@ -1,6 +1,6 @@
 """Logica aplicației pentru rezervări."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +15,10 @@ from app.services import facility_service
 # Câte rezervări care nu au început încă poate avea un utilizator odată,
 # ca un singur cont să nu poată ocupa tot calendarul.
 MAX_ACTIVE_BOOKINGS = 3
+
+# Cu cât timp înainte de începutul intervalului se mai poate anula o
+# rezervare (decizia din 22.11.2026), ca slotul să poată fi luat de altcineva.
+CANCELLATION_NOTICE = timedelta(hours=24)
 
 
 class SlotNotFoundError(Exception):
@@ -39,6 +43,18 @@ class OverlappingBookingError(Exception):
 
 class TooManyBookingsError(Exception):
     """Utilizatorul are deja numărul maxim de rezervări active."""
+
+
+class BookingNotFoundError(Exception):
+    """Rezervarea nu există sau este a altui utilizator."""
+
+
+class BookingAlreadyCancelledError(Exception):
+    """Rezervarea este deja anulată."""
+
+
+class CancellationTooLateError(Exception):
+    """Au rămas mai puțin de 24 de ore până la începutul intervalului."""
 
 
 def public_status(booking: Booking, now: datetime) -> str:
@@ -170,3 +186,51 @@ def create_booking(db: Session, user_id: int, slot_id: int) -> Booking:
         raise SlotNotAvailableError() from error
     db.refresh(booking)
     return booking
+
+
+def can_be_cancelled(slot: TimeSlot, now: datetime) -> bool:
+    """Spune dacă mai sunt cel puțin 24 de ore până la începutul slotului."""
+    starts_at = datetime.combine(slot.slot_date, slot.start_time)
+    return starts_at - now >= CANCELLATION_NOTICE
+
+
+def cancel_booking(db: Session, user_id: int, booking_id: int) -> None:
+    """Anulează rezervarea utilizatorului; slotul redevine liber.
+
+    Ridică BookingNotFoundError, BookingAlreadyCancelledError sau
+    CancellationTooLateError dacă rezervarea nu se poate anula.
+    """
+    # Un id în afara intervalului coloanei INT nu poate exista; fără această
+    # verificare, PostgreSQL ar da eroare (500).
+    if not 1 <= booking_id <= facility_service.MAX_DB_ID:
+        raise BookingNotFoundError()
+    booking = db.get(Booking, booking_id)
+    # Rezervarea altcuiva primește același răspuns ca una inexistentă, ca
+    # nimeni să nu poată afla ce rezervări au ceilalți.
+    if booking is None or booking.user_id != user_id:
+        raise BookingNotFoundError()
+    if booking.status == "cancelled":
+        raise BookingAlreadyCancelledError()
+    if not can_be_cancelled(booking.slot, facility_service.romania_now(db)):
+        raise CancellationTooLateError()
+
+    # Anulăm cu o singură comandă, care schimbă rezervarea doar dacă e încă
+    # confirmată. Dacă două anulări vin în același timp, a doua nu mai găsește
+    # rezervarea confirmată (0 rânduri modificate).
+    result = db.execute(
+        update(Booking)
+        .where(Booking.id == booking_id, Booking.status == "confirmed")
+        .values(status="cancelled")
+    )
+    if result.rowcount == 0:
+        db.rollback()
+        raise BookingAlreadyCancelledError()
+
+    # Slotul redevine liber doar dacă era rezervat; unul blocat pentru
+    # mentenanță rămâne blocat.
+    db.execute(
+        update(TimeSlot)
+        .where(TimeSlot.id == booking.slot_id, TimeSlot.status == "booked")
+        .values(status="free")
+    )
+    db.commit()
