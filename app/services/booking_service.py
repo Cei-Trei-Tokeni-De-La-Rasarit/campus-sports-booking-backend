@@ -10,7 +10,7 @@ from app.models.booking import Booking
 from app.models.facility import Facility
 from app.models.time_slot import TimeSlot
 from app.models.user import User
-from app.services import facility_service
+from app.services import facility_service, notification_service
 
 # Câte rezervări care nu au început încă poate avea un utilizator odată,
 # ca un singur cont să nu poată ocupa tot calendarul.
@@ -141,7 +141,8 @@ def create_booking(db: Session, user_id: int, slot_id: int) -> Booking:
     slot = db.get(TimeSlot, slot_id)
     if slot is None:
         raise SlotNotFoundError()
-    if db.get(Facility, slot.facility_id).status != "active":
+    facility = db.get(Facility, slot.facility_id)
+    if facility.status != "active":
         raise FacilityNotBookableError()
     if has_started(db, slot):
         raise SlotAlreadyStartedError()
@@ -177,6 +178,12 @@ def create_booking(db: Session, user_id: int, slot_id: int) -> Booking:
         created_at=func.timezone("UTC", func.now()),
     )
     db.add(booking)
+    notification_service.add_notification(
+        db,
+        user_id,
+        "confirmation",
+        notification_service.describe_slot(facility, slot),
+    )
     try:
         db.commit()
     except IntegrityError as error:
@@ -232,5 +239,13 @@ def cancel_booking(db: Session, user_id: int, booking_id: int) -> None:
         update(TimeSlot)
         .where(TimeSlot.id == booking.slot_id, TimeSlot.status == "booked")
         .values(status="free")
+    )
+    notification_service.add_notification(
+        db,
+        user_id,
+        "cancellation",
+        notification_service.describe_slot(
+            db.get(Facility, booking.slot.facility_id), booking.slot
+        ),
     )
     db.commit()
