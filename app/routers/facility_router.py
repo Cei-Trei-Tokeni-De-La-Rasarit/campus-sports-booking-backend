@@ -24,6 +24,7 @@ from app.services import (
     regulation_service,
     schedule_service,
     time_slot_service,
+    user_service,
 )
 
 router = APIRouter(prefix="/facilitati", tags=["Facilități"])
@@ -35,6 +36,25 @@ def get_existing_facility(facility_id: int, db: Session = Depends(get_db)) -> Fa
     if facility is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Facilitatea nu există."
+        )
+    return facility
+
+
+def require_facility_editor(
+    facility: Facility = Depends(get_existing_facility),
+    current_user: User = Depends(require_manager_or_admin),
+    db: Session = Depends(get_db),
+) -> Facility:
+    """Lasă mai departe doar administratorul sau managerul facilității (KAN-94).
+
+    Un manager primește 403 pentru o facilitate care nu i-a fost alocată.
+    """
+    if current_user.role == "manager" and not user_service.manages_facility(
+        db, current_user.id, facility.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Poți modifica doar facilitățile alocate ție.",
         )
     return facility
 
@@ -100,11 +120,10 @@ def create_facility(
 @router.put("/{facility_id}", response_model=FacilityRead)
 def update_facility(
     data: FacilityData,
-    facility: Facility = Depends(get_existing_facility),
+    facility: Facility = Depends(require_facility_editor),
     db: Session = Depends(get_db),
-    _: User = Depends(require_manager_or_admin),
 ) -> FacilityRead:
-    """Editează o facilitate (manager sau administrator).
+    """Editează o facilitate (administratorul sau managerul ei).
 
     Pentru dezactivare se trimite status = inactiva.
     """
@@ -168,11 +187,10 @@ def get_facility_schedule(
 @router.put("/{facility_id}/program", response_model=ScheduleUpdateRead)
 def update_facility_schedule(
     data: ScheduleData,
-    facility: Facility = Depends(get_existing_facility),
+    facility: Facility = Depends(require_facility_editor),
     db: Session = Depends(get_db),
-    _: User = Depends(require_manager_or_admin),
 ) -> ScheduleUpdateRead:
-    """Înlocuiește programul (manager sau administrator).
+    """Înlocuiește programul (administratorul sau managerul facilității).
 
     Intervalele libere din afara noului program dispar din calendar;
     rezervările rămân, iar răspunsul spune câte sunt în afara programului.
