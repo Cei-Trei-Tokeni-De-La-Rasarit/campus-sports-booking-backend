@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Callable, Iterator
+from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ os.environ["SECRET_KEY"] = "cheie-doar-pentru-teste-32-bytes!!"
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
+from app.services import email_service  # noqa: E402
 
 SCHEMA_FILE = Path(__file__).parent.parent / "app" / "database" / "shemas.sql"
 
@@ -50,6 +52,29 @@ def empty_tables() -> None:
         ).all()
         names = ", ".join(f'"{table}"' for table in tables)
         connection.exec_driver_sql(f"TRUNCATE {names} RESTART IDENTITY CASCADE")
+
+
+class FakeEmailSender:
+    """Trimițătorul fals din teste: reține emailurile în loc să le trimită."""
+
+    def __init__(self) -> None:
+        self.sent: list[EmailMessage] = []
+
+    def send(self, message: EmailMessage) -> None:
+        """Reține emailul, ca testul să poată verifica ce s-ar fi trimis."""
+        self.sent.append(message)
+
+
+@pytest.fixture(autouse=True)
+def sent_emails() -> Iterator[list[EmailMessage]]:
+    """Niciun test nu trimite emailuri reale, oricare ar fi EMAIL_MODE din .env.
+
+    Întoarce lista emailurilor „trimise” în test.
+    """
+    fake = FakeEmailSender()
+    previous = email_service.use_sender(fake)
+    yield fake.sent
+    email_service.use_sender(previous)
 
 
 @pytest.fixture

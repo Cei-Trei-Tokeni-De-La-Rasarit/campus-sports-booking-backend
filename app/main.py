@@ -15,6 +15,9 @@ from app.database import engine
 from app.routers import auth, booking_router, facility_router, notification_router
 from app.validation_messages import describe_errors
 
+# Mesajele de tip INFO din aplicație (de exemplu, emailurile din modul
+# consolă) apar în terminalul serverului, lângă cele ale lui uvicorn.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logger = logging.getLogger(__name__)
 
 # Adresele de la care frontend-ul are voie să trimită cereri (CORS),
