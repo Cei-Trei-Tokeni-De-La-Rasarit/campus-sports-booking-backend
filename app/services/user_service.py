@@ -4,14 +4,14 @@ Administratorul schimbă rolul unui utilizator și, pentru manageri, alege
 facilitățile pe care aceștia le pot edita (KAN-94).
 """
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.facility import Facility
 from app.models.facility_manager import FacilityManager
 from app.models.user import User
-from app.schemas.user import ROLE_TO_DB, RoleUpdate
+from app.schemas.user import ROLE_TO_DB, RoleUpdate, UserFilters
 from app.services import facility_service
 
 
@@ -40,6 +40,39 @@ def get_assigned_facility_ids(db: Session, manager_id: int) -> list[int]:
             .order_by(FacilityManager.facility_id)
         )
     )
+
+
+def list_users(db: Session, filters: UserFilters) -> list[User]:
+    """Lista utilizatorilor pentru administrator, ordonată după nume."""
+    query = select(User).order_by(User.name, User.id)
+    if filters.role is not None:
+        query = query.where(User.role == ROLE_TO_DB[filters.role])
+    if filters.search is not None:
+        # autoescape: „%” și „_” din text se caută ca atare, nu ca șabloane SQL.
+        query = query.where(
+            or_(
+                User.name.icontains(filters.search, autoescape=True),
+                User.email.icontains(filters.search, autoescape=True),
+            )
+        )
+    return list(db.scalars(query))
+
+
+def assigned_facilities_by_manager(
+    db: Session, manager_ids: list[int]
+) -> dict[int, list[int]]:
+    """Sălile alocate fiecărui manager, cu o singură interogare pentru toți."""
+    result: dict[int, list[int]] = {manager_id: [] for manager_id in manager_ids}
+    if not manager_ids:
+        return result
+    rows = db.execute(
+        select(FacilityManager.manager_id, FacilityManager.facility_id)
+        .where(FacilityManager.manager_id.in_(manager_ids))
+        .order_by(FacilityManager.facility_id)
+    )
+    for manager_id, facility_id in rows:
+        result[manager_id].append(facility_id)
+    return result
 
 
 def manages_facility(db: Session, manager_id: int, facility_id: int) -> bool:
