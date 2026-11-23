@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.facility import Facility
@@ -94,10 +94,8 @@ def delete_facility(db: Session, facility: Facility) -> None:
     Facilitățile cu intervale se dezactivează în loc să fie șterse, ca să
     rămână istoricul rezervărilor (vezi specificația API).
     """
-    # Tabelul time_slot nu are încă model în cod, așa că verificăm direct în SQL.
     has_slots = db.scalar(
-        text("SELECT EXISTS (SELECT 1 FROM time_slot WHERE facility_id = :id)"),
-        {"id": facility.id},
+        select(TimeSlot.id).where(TimeSlot.facility_id == facility.id).exists().select()
     )
     if has_slots:
         raise FacilityHasSlotsError
