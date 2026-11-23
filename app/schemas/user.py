@@ -125,6 +125,53 @@ class RoleUpdate(BaseModel):
         return self
 
 
+class PasswordResetRequest(BaseModel):
+    """Datele primite la `POST /auth/resetare-parola`."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    email: EmailStr = Field(alias="email", max_length=150)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        """Aceeași adresă, oricum ar fi scrisă (spații, majuscule)."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+
+# Token-ul din link are 43 de caractere; lăsăm loc, dar nu texte uriașe.
+MAX_RESET_TOKEN_LENGTH = 100
+
+
+class PasswordResetConfirm(BaseModel):
+    """Datele primite la `POST /auth/resetare-parola/confirmare`."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    token: str = Field(
+        alias="token", min_length=1, max_length=MAX_RESET_TOKEN_LENGTH, strict=True
+    )
+    # Aceleași reguli ca la înregistrare.
+    new_password: str = Field(
+        alias="parola_noua", min_length=8, max_length=MAX_PASSWORD_BYTES
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def password_fits_bcrypt(cls, password: str) -> str:
+        return _validate_password_bytes(password)
+
+
+class MessageRead(BaseModel):
+    """Un răspuns care conține doar un mesaj pentru utilizator."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    message: str = Field(alias="mesaj")
+
+
 class UserLogin(BaseModel):
     """Datele trimise la autentificare."""
 

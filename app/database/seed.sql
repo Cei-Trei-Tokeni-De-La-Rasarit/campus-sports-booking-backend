@@ -18,7 +18,8 @@
 -- ==========================================================================
 
 TRUNCATE "user", facility, regulation, maintenance, time_slot, booking,
-    waitlist_entry, notification, feedback, facility_manager, facility_schedule
+    waitlist_entry, notification, feedback, facility_manager, facility_schedule,
+    password_reset_token
     RESTART IDENTITY CASCADE;
 
 -- 1. Utilizatori
