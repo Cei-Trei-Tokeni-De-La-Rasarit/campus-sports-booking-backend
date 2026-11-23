@@ -18,7 +18,7 @@
 -- ==========================================================================
 
 TRUNCATE "user", facility, regulation, maintenance, time_slot, booking,
-    waitlist_entry, notification, feedback, facility_manager
+    waitlist_entry, notification, feedback, facility_manager, facility_schedule
     RESTART IDENTITY CASCADE;
 
 -- 1. Utilizatori
@@ -55,8 +55,17 @@ INSERT INTO regulation (facility_id, content) VALUES
 -- 4. Manager: sălile alocate
 INSERT INTO facility_manager (manager_id, facility_id) VALUES (2, 1), (2, 2);
 
--- 5. Sloturi de câte 2 ore, 08:00-20:00, de azi până peste 6 zile,
---    pentru toate sălile active.
+-- 5. Programul pe zile: sălile active sunt deschise zilnic 08:00-20:00, cu
+--    intervale de 2 ore (durata implicită). Bazinul nu are program.
+INSERT INTO facility_schedule (facility_id, weekday, opens_at, closes_at)
+SELECT f.id, d, '08:00', '20:00'
+FROM facility AS f
+CROSS JOIN generate_series(1, 7) AS d
+WHERE f.status = 'active';
+
+-- 6. Sloturi de câte 2 ore, 08:00-20:00, de azi până peste 6 zile, pentru
+--    toate sălile active. Aplicația le-ar genera oricum din program, dar le
+--    punem aici ca să putem adăuga rezervările și mentenanța de mai jos.
 INSERT INTO time_slot (facility_id, slot_date, start_time, end_time, status)
 SELECT f.id, CURRENT_DATE + d, make_time(h, 0, 0), make_time(h + 2, 0, 0), 'free'
 FROM facility AS f
@@ -64,7 +73,7 @@ CROSS JOIN generate_series(0, 6) AS d
 CROSS JOIN generate_series(8, 18, 2) AS h
 WHERE f.status = 'active';
 
--- 6. Câteva sloturi ocupate, cu rezervările lor.
+-- 7. Câteva sloturi ocupate, cu rezervările lor.
 UPDATE time_slot SET status = 'booked'
 WHERE (facility_id = 1 AND slot_date = CURRENT_DATE + 1 AND start_time = '10:00')
    OR (facility_id = 2 AND slot_date = CURRENT_DATE + 2 AND start_time = '16:00');
@@ -77,7 +86,7 @@ INSERT INTO booking (user_id, slot_id, status)
 SELECT 4, id, 'confirmed' FROM time_slot
 WHERE facility_id = 2 AND slot_date = CURRENT_DATE + 2 AND start_time = '16:00';
 
--- 7. Mentenanță: sala de fitness e blocată o zi întreagă.
+-- 8. Mentenanță: sala de fitness e blocată o zi întreagă.
 INSERT INTO maintenance (facility_id, start_date, end_date, reason)
 VALUES (3, CURRENT_DATE + 3, CURRENT_DATE + 3, 'Revizia aparatelor');
 

@@ -12,8 +12,19 @@ from app.models.facility import Facility
 from app.models.user import User
 from app.schemas.facility import FacilityData, FacilityFilters, FacilityRead
 from app.schemas.regulation import RegulationRead
+from app.schemas.schedule import (
+    ScheduleData,
+    ScheduleDayRead,
+    ScheduleRead,
+    ScheduleUpdateRead,
+)
 from app.schemas.time_slot import SlotRead
-from app.services import facility_service, regulation_service, time_slot_service
+from app.services import (
+    facility_service,
+    regulation_service,
+    schedule_service,
+    time_slot_service,
+)
 
 router = APIRouter(prefix="/facilitati", tags=["Facilități"])
 
@@ -106,13 +117,13 @@ def delete_facility(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> Response:
-    """Șterge o facilitate care nu are intervale în calendar (doar administrator)."""
+    """Șterge o facilitate care nu are rezervări (doar administrator)."""
     try:
         facility_service.delete_facility(db, facility)
-    except facility_service.FacilityHasSlotsError as error:
+    except facility_service.FacilityHasBookingsError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Facilitatea are intervale în calendar și nu poate fi ștearsă. "
+            detail="Facilitatea are rezervări și nu poate fi ștearsă. "
             "Dezactiveaz-o cu status = inactiva.",
         ) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -127,10 +138,49 @@ def list_facility_slots(
 ) -> list[SlotRead]:
     """Calendarul unei facilități: sloturile dintre două date, cu starea lor."""
     try:
-        slots = time_slot_service.list_slots(db, facility.id, start, end)
+        slots = time_slot_service.list_slots(db, facility, start, end)
     except time_slot_service.InvalidPeriodError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Date invalide. {error}",
         ) from error
     return [SlotRead.from_model(slot) for slot in slots]
+
+
+def read_schedule(db: Session, facility: Facility) -> ScheduleRead:
+    """Programul facilității, cu zilele în ordine (luni prima)."""
+    days = schedule_service.get_schedule(db, facility.id)
+    return ScheduleRead(
+        slot_minutes=facility.slot_minutes,
+        days=[ScheduleDayRead.from_model(day) for day in days],
+    )
+
+
+@router.get("/{facility_id}/program", response_model=ScheduleRead)
+def get_facility_schedule(
+    facility: Facility = Depends(get_existing_facility),
+    db: Session = Depends(get_db),
+) -> ScheduleRead:
+    """Programul pe zile al unei facilități (public)."""
+    return read_schedule(db, facility)
+
+
+@router.put("/{facility_id}/program", response_model=ScheduleUpdateRead)
+def update_facility_schedule(
+    data: ScheduleData,
+    facility: Facility = Depends(get_existing_facility),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager_or_admin),
+) -> ScheduleUpdateRead:
+    """Înlocuiește programul (manager sau administrator).
+
+    Intervalele libere din afara noului program dispar din calendar;
+    rezervările rămân, iar răspunsul spune câte sunt în afara programului.
+    """
+    bookings_outside = schedule_service.replace_schedule(db, facility, data)
+    schedule = read_schedule(db, facility)
+    return ScheduleUpdateRead(
+        slot_minutes=schedule.slot_minutes,
+        days=schedule.days,
+        bookings_outside=bookings_outside,
+    )

@@ -5,7 +5,9 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.facility import Facility
 from app.models.time_slot import TimeSlot
+from app.services import schedule_service
 
 # Perioada maximă care poate fi cerută odată, ca să încapă o lună întreagă
 # fără ca cineva să poată cere ani de calendar într-o singură cerere.
@@ -26,13 +28,19 @@ def check_period(start: date, end: date) -> None:
         )
 
 
-def list_slots(db: Session, facility_id: int, start: date, end: date) -> list[TimeSlot]:
-    """Întoarce sloturile facilității din perioada dată, în ordinea din calendar."""
+def list_slots(
+    db: Session, facility: Facility, start: date, end: date
+) -> list[TimeSlot]:
+    """Întoarce sloturile facilității din perioada dată, în ordinea din calendar.
+
+    Întâi se adaugă intervalele din programul sălii care lipsesc (KAN-106).
+    """
     check_period(start, end)
+    schedule_service.generate_slots(db, facility, start, end)
     query = (
         select(TimeSlot)
         .where(
-            TimeSlot.facility_id == facility_id,
+            TimeSlot.facility_id == facility.id,
             TimeSlot.slot_date >= start,
             TimeSlot.slot_date <= end,
         )

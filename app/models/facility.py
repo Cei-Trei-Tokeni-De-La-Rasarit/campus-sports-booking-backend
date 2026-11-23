@@ -16,6 +16,9 @@ class Facility(Base):
             "status IN ('active', 'inactive', 'under_maintenance')",
             name="ck_facility_status",
         ),
+        CheckConstraint(
+            "slot_minutes IN (60, 90, 120)", name="ck_facility_slot_minutes"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
@@ -25,3 +28,5 @@ class Facility(Base):
     capacity: Mapped[int]
     schedule: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), server_default="active")
+    # Durata unui interval din calendar, în minute (60, 90 sau 120).
+    slot_minutes: Mapped[int] = mapped_column(server_default="120")
