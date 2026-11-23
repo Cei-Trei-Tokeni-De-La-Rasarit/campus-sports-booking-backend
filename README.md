@@ -110,6 +110,26 @@ Dacă rulezi frontend-ul construit (`npm run preview`, port 4173), adaugă și a
 CORS_ORIGINS=http://localhost:5173,http://localhost:4173
 ```
 
+## Trimiterea emailurilor
+
+Aplicația trimite emailuri (de exemplu, pentru resetarea parolei). Modul se alege în
+`.env`, cu `EMAIL_MODE`:
+- `consola` (implicit): emailurile **nu** pleacă; apar în terminalul serverului, cu tot
+  textul lor. E suficient pentru dezvoltare și nu cere niciun cont de email.
+- `smtp`: emailurile se trimit prin contul Gmail al echipei.
+
+Pentru `smtp`:
+1. Pe contul Gmail al echipei, pornește **verificarea în doi pași** (Security →
+   2-Step Verification).
+2. Creează o **parolă de aplicație** la `myaccount.google.com/apppasswords`. Google o
+   afișează o singură dată; dacă o pierzi, creezi alta.
+3. Completează în `.env` `SMTP_USER`, `SMTP_PASSWORD` (parola de aplicație, fără spații) și
+   `EMAIL_FROM`, apoi pune `EMAIL_MODE=smtp` și repornește serverul.
+
+Dacă lipsește o variabilă, serverul nu pornește și spune care. Parola de aplicație stă
+doar în `.env`; nu o pune în cod, pe GitHub sau în chat. Testele nu trimit niciodată
+emailuri reale, oricare ar fi `EMAIL_MODE`.
+
 ## Teste
 
 Testele (pytest) folosesc o bază separată, golită la fiecare test, ca să nu atingă
