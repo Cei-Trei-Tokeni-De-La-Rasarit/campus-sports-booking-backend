@@ -124,15 +124,42 @@ def test_delete_missing_facility_returns_404(client: TestClient) -> None:
     assert response.json() == {"mesaj": "Facilitatea nu există."}
 
 
-def test_delete_facility_with_time_slots_returns_409_and_keeps_it(
-    client: TestClient, add_time_slot: Callable[[int], None]
+def test_delete_facility_with_free_slots_deletes_them_too(
+    client: TestClient, add_time_slot: Callable[[int], int]
 ) -> None:
     facility = create_facility(client)
     add_time_slot(facility["id"])
 
     response = client.delete(f"/facilitati/{facility['id']}")
 
+    assert response.status_code == 204
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT COUNT(*) FROM time_slot")) == 0
+
+
+@pytest.mark.parametrize("booking_status", ["confirmed", "cancelled"])
+def test_delete_facility_with_bookings_returns_409_and_keeps_it(
+    client: TestClient,
+    add_time_slot: Callable[..., int],
+    log_in: Callable[..., tuple[int, dict[str, str]]],
+    booking_status: str,
+) -> None:
+    facility = create_facility(client)
+    slot_id = add_time_slot(facility["id"])
+    user_id, _ = log_in("client.stergere@student.usv.ro")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO booking (user_id, slot_id, status) "
+                "VALUES (:user_id, :slot_id, :status)"
+            ),
+            {"user_id": user_id, "slot_id": slot_id, "status": booking_status},
+        )
+
+    response = client.delete(f"/facilitati/{facility['id']}")
+
     assert response.status_code == 409
+    assert "rezervări" in response.json()["mesaj"]
     assert "inactiva" in response.json()["mesaj"]
     assert client.get(f"/facilitati/{facility['id']}").json() == facility
 

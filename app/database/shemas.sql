@@ -18,7 +18,9 @@ CREATE TABLE facility (
     capacity  INT          NOT NULL CHECK (capacity > 0),
     schedule  VARCHAR(200),
     status    VARCHAR(20)  NOT NULL DEFAULT 'active'
-              CHECK (status IN ('active', 'inactive', 'under_maintenance'))
+              CHECK (status IN ('active', 'inactive', 'under_maintenance')),
+    -- durata unui interval din calendar, în minute
+    slot_minutes INT NOT NULL DEFAULT 120 CHECK (slot_minutes IN (60, 90, 120))
 );
 
 -- 3. regulation (1:1 with facility)
@@ -102,4 +104,15 @@ CREATE TABLE facility_manager (
     manager_id   INT NOT NULL REFERENCES "user"(id)   ON DELETE CASCADE,
     facility_id  INT NOT NULL REFERENCES facility(id) ON DELETE CASCADE,
     PRIMARY KEY (manager_id, facility_id)
+);
+
+-- 11. facility_schedule (programul pe zile; o zi lipsă = sala e închisă)
+CREATE TABLE facility_schedule (
+    id           INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    facility_id  INT      NOT NULL REFERENCES facility(id) ON DELETE CASCADE,
+    weekday      SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+    opens_at     TIME     NOT NULL,
+    closes_at    TIME     NOT NULL,
+    CHECK (closes_at > opens_at),
+    UNIQUE (facility_id, weekday)
 );

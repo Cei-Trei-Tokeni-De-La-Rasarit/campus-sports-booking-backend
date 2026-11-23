@@ -2,9 +2,10 @@
 
 from datetime import datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.booking import Booking
 from app.models.facility import Facility
 from app.models.time_slot import TimeSlot
 from app.schemas.facility import FacilityData, FacilityFilters
@@ -16,8 +17,8 @@ MAX_DB_ID = 2_147_483_647
 ROMANIA_TIMEZONE = "Europe/Bucharest"
 
 
-class FacilityHasSlotsError(Exception):
-    """Facilitatea are intervale în calendar și nu poate fi ștearsă."""
+class FacilityHasBookingsError(Exception):
+    """Facilitatea are rezervări și nu poate fi ștearsă."""
 
 
 def romania_now(db: Session) -> datetime:
@@ -89,17 +90,20 @@ def update_facility(db: Session, facility: Facility, data: FacilityData) -> Faci
 
 
 def delete_facility(db: Session, facility: Facility) -> None:
-    """Șterge o facilitate care nu are intervale în calendar.
+    """Șterge o facilitate care nu are rezervări.
 
-    Facilitățile cu intervale se dezactivează în loc să fie șterse, ca să
-    rămână istoricul rezervărilor (vezi specificația API).
+    Facilitățile cu rezervări (chiar și anulate) se dezactivează în loc să fie
+    șterse, ca să rămână istoricul rezervărilor (vezi specificația API).
+    Intervalele libere și programul se șterg odată cu facilitatea (CASCADE).
     """
-    # Tabelul time_slot nu are încă model în cod, așa că verificăm direct în SQL.
-    has_slots = db.scalar(
-        text("SELECT EXISTS (SELECT 1 FROM time_slot WHERE facility_id = :id)"),
-        {"id": facility.id},
+    has_bookings = db.scalar(
+        select(Booking.id)
+        .join(TimeSlot, Booking.slot_id == TimeSlot.id)
+        .where(TimeSlot.facility_id == facility.id)
+        .exists()
+        .select()
     )
-    if has_slots:
-        raise FacilityHasSlotsError
+    if has_bookings:
+        raise FacilityHasBookingsError
     db.delete(facility)
     db.commit()

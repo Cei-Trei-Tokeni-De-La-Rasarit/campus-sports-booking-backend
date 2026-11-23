@@ -78,6 +78,13 @@ psql -U postgres -d campus_sports -f app/database/seed.sql
   oricând, de exemplu ca să ai intervale pentru săptămâna curentă.
 - Conturile de demo și parola lor sunt în comentariul de la începutul `seed.sql`.
 
+Dacă baza ta a fost creată înainte de programul pe zile (KAN-106), rulează o singură
+dată migrarea, care adaugă tabelul `facility_schedule` și coloana `slot_minutes`:
+```powershell
+psql -U postgres -d campus_sports -f app/database/migrari/2026-11-program-sali.sql
+```
+Pe o bază nouă nu e nevoie: `shemas.sql` le conține deja.
+
 Dacă vrei să o iei de la zero (șterge tot din bază):
 ```powershell
 psql -U postgres -d campus_sports -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
