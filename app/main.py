@@ -19,8 +19,15 @@ from app.routers import (
     notification_router,
     user_router,
 )
+
+# Importat la pornire, ca o configurație de email greșită (EMAIL_MODE=smtp fără
+# datele contului) să oprească serverul imediat, nu abia la primul email.
+from app.services import email_service  # noqa: F401
 from app.validation_messages import describe_errors
 
+# Mesajele de tip INFO din aplicație (de exemplu, emailurile din modul
+# consolă) apar în terminalul serverului, lângă cele ale lui uvicorn.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logger = logging.getLogger(__name__)
 
 # Adresele de la care frontend-ul are voie să trimită cereri (CORS),
