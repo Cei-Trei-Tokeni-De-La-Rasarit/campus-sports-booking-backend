@@ -1,6 +1,7 @@
 """Testele pentru rolurile la modificarea facilităților (KAN-53, KAN-95).
 
-Creare și ștergere: doar administrator. Editare: manager sau administrator.
+Creare și ștergere: doar administrator. Editare: administratorul sau managerul
+căruia i-a fost alocată facilitatea (KAN-94).
 Citirea (catalogul și detaliile) rămâne publică.
 """
 
@@ -163,14 +164,108 @@ def test_manager_cannot_create_or_delete_facilities(
     assert facilities_in_db() == before
 
 
-def test_manager_can_edit_facility(
+def allocate_to_manager(facility_id: int) -> None:
+    """Alocă facilitatea contului de manager creat de `headers_for`."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO facility_manager (manager_id, facility_id) "
+                "SELECT id, :facility_id FROM \"user\" WHERE email = 'manager@usv.ro'"
+            ),
+            {"facility_id": facility_id},
+        )
+
+
+def test_manager_can_edit_assigned_facility(
     client: TestClient, facility_id: int, headers_for: Callable
 ) -> None:
-    response = send(client, "PUT", facility_id, headers_for("manager"))
+    headers = headers_for("manager")
+    allocate_to_manager(facility_id)
+
+    response = send(client, "PUT", facility_id, headers)
 
     assert response.status_code == 200
     assert response.json()["nume"] == CHANGED["nume"]
     assert facilities_in_db()[0][1] == CHANGED["nume"]
+
+
+def test_manager_cannot_edit_facility_not_assigned_to_him(
+    client: TestClient, facility_id: int, headers_for: Callable
+) -> None:
+    headers = headers_for("manager")
+    other = client.post(
+        "/facilitati",
+        json={**FACILITY, "nume": "Teren de fotbal"},
+        headers=headers_for("administrator"),
+    ).json()["id"]
+    # Managerul are o altă facilitate, nu pe cea pe care încearcă s-o editeze.
+    allocate_to_manager(other)
+    before = facilities_in_db()
+
+    response = send(client, "PUT", facility_id, headers)
+
+    assert response.status_code == 403
+    assert response.json() == {"mesaj": "Poți modifica doar facilitățile alocate ție."}
+    assert facilities_in_db() == before
+
+
+def test_manager_without_facilities_cannot_edit_any(
+    client: TestClient, facility_id: int, headers_for: Callable
+) -> None:
+    before = facilities_in_db()
+
+    response = send(client, "PUT", facility_id, headers_for("manager"))
+
+    assert response.status_code == 403
+    assert facilities_in_db() == before
+
+
+def test_manager_editing_missing_facility_returns_404(
+    client: TestClient, headers_for: Callable
+) -> None:
+    response = send(client, "PUT", 999, headers_for("manager"))
+
+    assert response.status_code == 404
+    assert response.json() == {"mesaj": "Facilitatea nu există."}
+
+
+SCHEDULE = {
+    "durata_slot": 120,
+    "zile": [{"zi": 1, "deschidere": "08:00", "inchidere": "12:00"}],
+}
+
+
+def schedule_days(client: TestClient, facility_id: int) -> list:
+    """Zilele din programul facilității, citite prin API."""
+    return client.get(f"/facilitati/{facility_id}/program").json()["zile"]
+
+
+def test_manager_can_change_schedule_of_assigned_facility(
+    client: TestClient, facility_id: int, headers_for: Callable
+) -> None:
+    headers = headers_for("manager")
+    allocate_to_manager(facility_id)
+
+    response = client.put(
+        f"/facilitati/{facility_id}/program", json=SCHEDULE, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert schedule_days(client, facility_id) == SCHEDULE["zile"]
+
+
+def test_manager_cannot_change_schedule_of_other_facility(
+    client: TestClient, facility_id: int, headers_for: Callable
+) -> None:
+    response = client.put(
+        f"/facilitati/{facility_id}/program",
+        json=SCHEDULE,
+        headers=headers_for("manager"),
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"mesaj": "Poți modifica doar facilitățile alocate ție."}
+    assert schedule_days(client, facility_id) == []
 
 
 # Rolul administrator: poate face toate operațiile.
