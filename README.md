@@ -58,7 +58,7 @@ Deschide `.env` și completează:
   ```powershell
   py -3.12 -c "import secrets; print(secrets.token_urlsafe(48))"
   ```
-  Fără `SECRET_KEY` serverul nu pornește.
+  Fără `SECRET_KEY` sau cu una mai scurtă de 32 de caractere, serverul nu pornește.
 
 Fișierul `.env` nu se pune pe GitHub (este în `.gitignore`). Nu trimite parolele sau
 cheile prin chat; fiecare membru își face propriul `.env`.
@@ -172,6 +172,7 @@ Fluxul complet (ticket, branch, pull request) este în [CONTRIBUTING.md](CONTRIB
 |---|---|
 | `uvicorn : The term 'uvicorn' is not recognized` | Mediul virtual nu este activat: `.venv\Scripts\Activate.ps1` (vezi pasul 2). |
 | `RuntimeError: Lipsește variabila SECRET_KEY` | Lipsește `.env` sau `SECRET_KEY` din el (pasul 3). |
+| `RuntimeError: SECRET_KEY trebuie să aibă cel puțin 32 de caractere` | Cheia din `.env` e prea scurtă; generează una nouă (pasul 3). |
 | `password authentication failed for user "postgres"` | Parola din `DATABASE_URL` nu este cea a utilizatorului `postgres`. |
 | `database "campus_sports" does not exist` | Baza nu a fost creată (pasul 4). |
 | `relation "user" does not exist` | Tabelele nu au fost create: rulează `shemas.sql` (pasul 4). |
