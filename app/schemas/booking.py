@@ -43,6 +43,14 @@ class BookingCreate(BaseModel):
         return accepted
 
 
+class BookingReschedule(BaseModel):
+    """Datele trimise la reprogramare: intervalul nou din aceeași sală."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    slot_id: int = Field(alias="slot_id", ge=1, le=MAX_DB_ID, strict=True)
+
+
 class BookingRead(BaseModel):
     """O rezervare, așa cum este trimisă de API."""
 

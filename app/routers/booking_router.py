@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.routers.auth import get_current_user
-from app.schemas.booking import BookingCreate, BookingRead, BookingStatus
+from app.schemas.booking import (
+    BookingCreate,
+    BookingRead,
+    BookingReschedule,
+    BookingStatus,
+)
 from app.services import booking_service, facility_service
 
 router = APIRouter(prefix="/rezervari", tags=["Rezervări"])
@@ -98,3 +103,58 @@ def cancel_booking(
             "de începutul intervalului.",
         ) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Mesajele pentru erorile reprogramării, în ordinea verificărilor.
+RESCHEDULE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    booking_service.BookingNotFoundError: (404, "Rezervarea nu există."),
+    booking_service.BookingAlreadyCancelledError: (
+        409,
+        "Rezervarea este anulată și nu mai poate fi reprogramată.",
+    ),
+    booking_service.CancellationTooLateError: (
+        400,
+        "Rezervarea se poate reprograma cu cel puțin 24 de ore înainte "
+        "de începutul intervalului.",
+    ),
+    booking_service.SameSlotError: (
+        400,
+        "Alege un alt interval decât cel pe care ai deja rezervarea.",
+    ),
+    booking_service.SlotNotFoundError: (404, "Slotul nu există."),
+    booking_service.OtherFacilitySlotError: (
+        400,
+        "Rezervarea se poate muta doar pe un interval din aceeași sală.",
+    ),
+    booking_service.FacilityNotBookableError: (
+        409,
+        "Facilitatea nu poate fi rezervată acum.",
+    ),
+    booking_service.SlotAlreadyStartedError: (
+        409,
+        "Slotul a început deja și nu mai poate fi rezervat.",
+    ),
+    booking_service.OverlappingBookingError: (
+        409,
+        "Ai deja o rezervare care se suprapune cu acest interval.",
+    ),
+    booking_service.SlotNotAvailableError: (409, "Slotul nu mai este liber."),
+}
+
+
+@router.patch("/{booking_id}", response_model=BookingRead)
+def reschedule_booking(
+    booking_id: int,
+    data: BookingReschedule,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BookingRead:
+    """Mută o rezervare a utilizatorului pe alt interval din aceeași sală."""
+    try:
+        booking = booking_service.reschedule_booking(
+            db, current_user.id, booking_id, data.slot_id
+        )
+    except tuple(RESCHEDULE_ERRORS) as error:
+        status_code, message = RESCHEDULE_ERRORS[type(error)]
+        raise HTTPException(status_code=status_code, detail=message) from error
+    return BookingRead.from_model(booking)

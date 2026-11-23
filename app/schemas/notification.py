@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.notification import Notification
 
 NotificationType = Literal[
-    "confirmare", "memento", "loc_eliberat", "mentenanta", "anulare"
+    "confirmare", "memento", "loc_eliberat", "mentenanta", "anulare", "reprogramare"
 ]
 
 # Tipurile din baza de date și echivalentul lor din API.
@@ -22,6 +22,7 @@ TYPE_FROM_DB: dict[str, str] = {
     "slot_released": "loc_eliberat",
     "maintenance": "mentenanta",
     "cancellation": "anulare",
+    "reschedule": "reprogramare",
 }
 
 
