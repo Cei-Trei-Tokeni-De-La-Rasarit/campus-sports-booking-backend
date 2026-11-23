@@ -48,3 +48,18 @@ def test_simple_request_from_frontend_gets_cors_header(client: TestClient) -> No
     response = client.get("/facilitati", headers={"Origin": FRONTEND})
 
     assert response.headers["access-control-allow-origin"] == FRONTEND
+
+
+def test_frontend_may_send_patch(client: TestClient) -> None:
+    # PATCH /notificari/{id} marchează o notificare ca citită.
+    response = client.options(
+        "/notificari/1",
+        headers={
+            "Origin": FRONTEND,
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "PATCH" in response.headers["access-control-allow-methods"]

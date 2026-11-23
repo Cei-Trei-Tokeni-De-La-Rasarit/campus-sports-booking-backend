@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import engine
-from app.routers import auth, booking_router, facility_router
+from app.routers import auth, booking_router, facility_router, notification_router
 from app.validation_messages import describe_errors
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ app = FastAPI(title="Campus Sports Booking API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in CORS_ORIGINS],
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     # Authorization: frontend-ul trimite token-ul JWT (Bearer) în acest header.
     allow_headers=["Content-Type", "Authorization"],
 )
@@ -33,6 +33,7 @@ app.include_router(facility_router.router)
 app.include_router(auth.router)
 app.include_router(auth.users_router)
 app.include_router(booking_router.router)
+app.include_router(notification_router.router)
 
 
 @app.exception_handler(StarletteHTTPException)
