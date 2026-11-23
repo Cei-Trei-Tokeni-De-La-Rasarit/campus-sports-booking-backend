@@ -56,10 +56,24 @@ class FacilityData(BaseModel):
         return values
 
 
-class FacilityRead(FacilityData):
-    """O facilitate, așa cum este trimisă de API."""
+class FacilityRead(BaseModel):
+    """O facilitate, așa cum este trimisă de API.
+
+    Nu moștenește limitele din FacilityData: acelea verifică datele primite.
+    Un rând din baza de date cu o valoare neobișnuită (de exemplu, capacitatea
+    1500 pusă direct în SQL) se trimite așa cum este, în loc să dea eroare 500
+    pentru tot catalogul.
+    """
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
 
     id: int = Field(alias="id")
+    name: str = Field(alias="nume")
+    sport: str = Field(alias="sport")
+    location: str = Field(alias="locatie")
+    capacity: int = Field(alias="capacitate")
+    schedule: str | None = Field(default=None, alias="program")
+    status: FacilityStatus = Field(alias="status")
 
     @classmethod
     def from_model(cls, facility: Facility) -> "FacilityRead":
