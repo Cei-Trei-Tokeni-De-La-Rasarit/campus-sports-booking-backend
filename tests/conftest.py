@@ -24,6 +24,9 @@ if "test" not in (make_url(TEST_DATABASE_URL).database or ""):
 # înainte de a importa codul aplicației.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["SECRET_KEY"] = "cheie-doar-pentru-teste-32-bytes!!"
+# Testele pornesc oricare ar fi EMAIL_MODE din .env (de exemplu, smtp fără
+# parola contului); oricum folosesc trimițătorul fals de mai jos.
+os.environ["EMAIL_MODE"] = "consola"
 
 from fastapi.testclient import TestClient  # noqa: E402
 

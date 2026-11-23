@@ -30,6 +30,9 @@ SMTP_VARIABLES = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "EMAIL
 # Câte secunde așteptăm serverul SMTP înainte să renunțăm.
 SMTP_TIMEOUT_SECONDS = 10
 
+# Cel mai mare număr de port TCP.
+MAX_PORT = 65535
+
 
 class EmailSendError(Exception):
     """Emailul nu a putut fi trimis (server indisponibil, autentificare etc.)."""
@@ -76,21 +79,50 @@ class SmtpSender:
         """Se conectează, se autentifică și trimite; la eroare EmailSendError."""
         settings = self.settings
         try:
-            with smtplib.SMTP(
+            server = smtplib.SMTP(
                 settings.host, settings.port, timeout=SMTP_TIMEOUT_SECONDS
-            ) as server:
+            )
+            try:
                 server.starttls(context=ssl.create_default_context())
                 server.login(settings.user, settings.password)
                 server.send_message(message)
+            finally:
+                close_quietly(server)
         except (smtplib.SMTPException, OSError) as error:
-            # În log apare doar tipul erorii: fără parolă și fără conținutul
-            # emailului (de exemplu, linkul pentru resetarea parolei).
+            # În log apar doar tipul erorii și adresa mascată: fără parolă,
+            # fără adresa completă (date personale) și fără textul emailului
+            # (de exemplu, linkul pentru resetarea parolei).
             logger.error(
                 "Emailul către %s nu a putut fi trimis: %s",
-                message["To"],
+                mask_address(str(message["To"])),
                 type(error).__name__,
             )
             raise EmailSendError("Emailul nu a putut fi trimis.") from error
+
+
+def close_quietly(server: smtplib.SMTP) -> None:
+    """Închide conexiunea SMTP fără să ridice erori.
+
+    Dacă serverul nu răspunde corect la QUIT, emailul a plecat deja; o eroare
+    aici ar face aplicația să creadă că trimiterea a eșuat (și ar putea
+    retrimite emailul), așa că doar o notăm în log.
+    """
+    try:
+        server.quit()
+    except (smtplib.SMTPException, OSError) as error:
+        logger.warning("Conexiunea SMTP nu s-a închis curat: %s", type(error).__name__)
+        server.close()
+
+
+def mask_address(address: str) -> str:
+    """Ascunde adresa pentru log.
+
+    De exemplu, „ana.popescu@student.usv.ro” devine „a***@student.usv.ro”.
+    """
+    local, separator, domain = address.rpartition("@")
+    if not separator or not local:
+        return "***"
+    return f"{local[0]}***@{domain}"
 
 
 def load_smtp_settings(environ: Mapping[str, str]) -> SmtpSettings:
@@ -104,10 +136,13 @@ def load_smtp_settings(environ: Mapping[str, str]) -> SmtpSettings:
         )
     try:
         port = int(environ["SMTP_PORT"])
-    except ValueError as error:
+    except ValueError:
+        port = 0
+    if not 1 <= port <= MAX_PORT:
         raise RuntimeError(
-            "SMTP_PORT trebuie să fie un număr (de exemplu, 587)."
-        ) from error
+            f"SMTP_PORT trebuie să fie un număr între 1 și {MAX_PORT} "
+            "(de exemplu, 587)."
+        )
     return SmtpSettings(
         host=environ["SMTP_HOST"],
         port=port,
@@ -128,6 +163,8 @@ def create_sender(environ: Mapping[str, str]) -> tuple[EmailSender, str]:
         settings = load_smtp_settings(environ)
         return SmtpSender(settings), settings.sender
     sender = environ.get("EMAIL_FROM") or "Campus Sports Booking <noreply@localhost>"
+    # Avertisment la pornire, ca să nu pară că emailurile pleacă.
+    logger.warning("EMAIL_MODE=consola: emailurile nu se trimit, apar doar în log.")
     return ConsoleSender(), sender
 
 

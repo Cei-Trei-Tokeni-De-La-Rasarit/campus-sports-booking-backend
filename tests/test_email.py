@@ -40,14 +40,18 @@ class FakeSmtp:
         self.messages: list[EmailMessage] = []
         FakeSmtp.instances.append(self)
 
-    def __enter__(self) -> "FakeSmtp":
-        return self
-
-    def __exit__(self, *args: object) -> None:
+    def quit(self) -> None:
         self.calls.append("quit")
+        if FakeSmtp.fail_on == "quit":
+            raise smtplib.SMTPServerDisconnected("conexiunea s-a închis")
+
+    def close(self) -> None:
+        self.calls.append("close")
 
     def starttls(self, context: object) -> None:
         self.calls.append("starttls")
+        if FakeSmtp.fail_on == "starttls":
+            raise smtplib.SMTPNotSupportedError("STARTTLS nu e suportat")
 
     def login(self, user: str, password: str) -> None:
         self.calls.append("login")
@@ -59,6 +63,8 @@ class FakeSmtp:
 
     def send_message(self, message: EmailMessage) -> None:
         self.calls.append("send")
+        if FakeSmtp.fail_on == "send":
+            raise smtplib.SMTPRecipientsRefused({message["To"]: (550, b"No such user")})
         self.messages.append(message)
 
 
@@ -121,10 +127,19 @@ def test_header_with_new_line_is_rejected(to: str, subject: str) -> None:
 # Alegerea modului din .env.
 
 
-def test_console_mode_is_the_default() -> None:
+def test_console_mode_is_the_default_and_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     sender, _ = email_service.create_sender({})
 
     assert isinstance(sender, email_service.ConsoleSender)
+    assert "nu se trimit" in caplog.text
+
+
+def test_smtp_mode_does_not_warn(caplog: pytest.LogCaptureFixture) -> None:
+    email_service.create_sender(SMTP_ENV)
+
+    assert "nu se trimit" not in caplog.text
 
 
 def test_smtp_mode_uses_the_settings_from_env() -> None:
@@ -149,9 +164,16 @@ def test_smtp_mode_with_missing_variable_names_it(missing: str) -> None:
         email_service.create_sender(env)
 
 
-def test_smtp_port_must_be_a_number() -> None:
+@pytest.mark.parametrize("port", ["abc", "0", "-1", "65536"])
+def test_smtp_port_must_be_a_valid_number(port: str) -> None:
     with pytest.raises(RuntimeError, match="SMTP_PORT"):
-        email_service.create_sender({**SMTP_ENV, "SMTP_PORT": "abc"})
+        email_service.create_sender({**SMTP_ENV, "SMTP_PORT": port})
+
+
+def test_smtp_port_65535_is_accepted() -> None:
+    sender, _ = email_service.create_sender({**SMTP_ENV, "SMTP_PORT": "65535"})
+
+    assert isinstance(sender, email_service.SmtpSender)
 
 
 # Modul consolă.
@@ -183,7 +205,7 @@ def test_smtp_sender_encrypts_logs_in_and_sends(fake_smtp: type[FakeSmtp]) -> No
     assert server.messages[0]["To"] == "ana.popescu@student.usv.ro"
 
 
-@pytest.mark.parametrize("fail_on", ["connect", "login"])
+@pytest.mark.parametrize("fail_on", ["connect", "starttls", "login", "send"])
 def test_smtp_error_raises_email_send_error_without_secrets_in_log(
     fake_smtp: type[FakeSmtp], caplog: pytest.LogCaptureFixture, fail_on: str
 ) -> None:
@@ -195,6 +217,47 @@ def test_smtp_error_raises_email_send_error_without_secrets_in_log(
     assert "nu a putut fi trimis" in caplog.text
     assert SMTP_ENV["SMTP_PASSWORD"] not in caplog.text
     assert BODY not in caplog.text
+    # Adresa apare doar mascată (date personale).
+    assert "ana.popescu" not in caplog.text
+    assert "a***@student.usv.ro" in caplog.text
+
+
+@pytest.mark.parametrize("fail_on", ["starttls", "login", "send"])
+def test_connection_is_closed_after_an_error(
+    fake_smtp: type[FakeSmtp], fail_on: str
+) -> None:
+    fake_smtp.fail_on = fail_on
+
+    with pytest.raises(email_service.EmailSendError):
+        smtp_sender().send(message())
+
+    assert fake_smtp.instances[0].calls[-1] == "quit"
+
+
+def test_error_at_quit_after_sending_is_not_a_failure(
+    fake_smtp: type[FakeSmtp], caplog: pytest.LogCaptureFixture
+) -> None:
+    fake_smtp.fail_on = "quit"
+
+    smtp_sender().send(message())
+
+    server = fake_smtp.instances[0]
+    assert len(server.messages) == 1
+    assert server.calls[-2:] == ["quit", "close"]
+    assert "nu s-a închis curat" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("address", "masked"),
+    [
+        ("ana.popescu@student.usv.ro", "a***@student.usv.ro"),
+        ("x@usv.ro", "x***@usv.ro"),
+        ("fara-arond", "***"),
+        ("@usv.ro", "***"),
+    ],
+)
+def test_mask_address(address: str, masked: str) -> None:
+    assert email_service.mask_address(address) == masked
 
 
 # Funcția folosită de aplicație.
