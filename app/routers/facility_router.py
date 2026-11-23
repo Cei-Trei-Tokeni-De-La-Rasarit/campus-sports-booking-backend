@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models.facility import Facility
 from app.models.user import User
 from app.schemas.facility import FacilityData, FacilityFilters, FacilityRead
-from app.schemas.regulation import RegulationRead
+from app.schemas.regulation import RegulationData, RegulationRead
 from app.schemas.schedule import (
     ScheduleData,
     ScheduleDayRead,
@@ -104,6 +104,20 @@ def get_facility_regulation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Facilitatea nu are regulament.",
         )
+    return RegulationRead.from_model(regulation)
+
+
+@router.put("/{facility_id}/regulament", response_model=RegulationRead)
+def update_facility_regulation(
+    data: RegulationData,
+    facility: Facility = Depends(require_facility_editor),
+    db: Session = Depends(get_db),
+) -> RegulationRead:
+    """Înlocuiește regulamentul (administratorul sau managerul facilității).
+
+    Dacă facilitatea nu are încă regulament, îl creează.
+    """
+    regulation = regulation_service.save_regulation(db, facility.id, data.content)
     return RegulationRead.from_model(regulation)
 
 
