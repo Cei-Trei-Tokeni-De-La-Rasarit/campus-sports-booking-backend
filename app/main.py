@@ -13,6 +13,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import engine
 from app.routers import auth, booking_router, facility_router, notification_router
+
+# Importat la pornire, ca o configurație de email greșită (EMAIL_MODE=smtp fără
+# datele contului) să oprească serverul imediat, nu abia la primul email.
+from app.services import email_service  # noqa: F401
 from app.validation_messages import describe_errors
 
 # Mesajele de tip INFO din aplicație (de exemplu, emailurile din modul
