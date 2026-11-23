@@ -57,6 +57,14 @@ class CancellationTooLateError(Exception):
     """Au rămas mai puțin de 24 de ore până la începutul intervalului."""
 
 
+class SameSlotError(Exception):
+    """Reprogramarea cere același interval pe care e deja rezervarea."""
+
+
+class OtherFacilitySlotError(Exception):
+    """Intervalul nou este al altei săli decât rezervarea."""
+
+
 def public_status(booking: Booking, now: datetime) -> str:
     """Calculează starea afișată a unei rezervări."""
     if booking.status == "cancelled":
@@ -95,11 +103,15 @@ def has_started(db: Session, slot: TimeSlot) -> bool:
     return (slot.slot_date, slot.start_time) <= (now.date(), now.time())
 
 
-def has_overlapping_booking(db: Session, user_id: int, slot: TimeSlot) -> bool:
+def has_overlapping_booking(
+    db: Session, user_id: int, slot: TimeSlot, ignored_booking_id: int | None = None
+) -> bool:
     """Spune dacă utilizatorul are o rezervare confirmată în același interval.
 
     Două intervale din aceeași zi se suprapun dacă fiecare începe înainte să
-    se termine celălalt (10:00-11:00 și 11:00-12:00 nu se suprapun).
+    se termine celălalt (10:00-11:00 și 11:00-12:00 nu se suprapun). La
+    reprogramare, rezervarea mutată nu se socotește (`ignored_booking_id`):
+    altfel 10:00-12:00 nu s-ar putea muta pe 11:00-13:00.
     """
     query = (
         select(Booking.id)
@@ -107,6 +119,7 @@ def has_overlapping_booking(db: Session, user_id: int, slot: TimeSlot) -> bool:
         .where(
             Booking.user_id == user_id,
             Booking.status == "confirmed",
+            Booking.id != ignored_booking_id,
             TimeSlot.slot_date == slot.slot_date,
             TimeSlot.start_time < slot.end_time,
             TimeSlot.end_time > slot.start_time,
@@ -221,15 +234,23 @@ def cancel_booking(db: Session, user_id: int, booking_id: int) -> None:
     if not can_be_cancelled(booking.slot, facility_service.romania_now(db)):
         raise CancellationTooLateError()
 
+    # Blocăm întâi rândul utilizatorului, ca la creare și la reprogramare:
+    # o anulare și o reprogramare trimise în același timp se execută pe rând,
+    # în aceeași ordine a blocărilor (altfel PostgreSQL ar găsi un deadlock).
+    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+
     # Anulăm cu o singură comandă, care schimbă rezervarea doar dacă e încă
     # confirmată. Dacă două anulări vin în același timp, a doua nu mai găsește
-    # rezervarea confirmată (0 rânduri modificate).
-    result = db.execute(
+    # rezervarea confirmată (0 rânduri modificate). RETURNING dă intervalul
+    # pe care e rezervarea chiar acum: dacă o reprogramare a mutat-o între
+    # timp, eliberăm intervalul nou, nu pe cel citit mai devreme.
+    slot_id = db.scalar(
         update(Booking)
         .where(Booking.id == booking_id, Booking.status == "confirmed")
         .values(status="cancelled")
+        .returning(Booking.slot_id)
     )
-    if result.rowcount == 0:
+    if slot_id is None:
         db.rollback()
         raise BookingAlreadyCancelledError()
 
@@ -237,15 +258,113 @@ def cancel_booking(db: Session, user_id: int, booking_id: int) -> None:
     # mentenanță rămâne blocat.
     db.execute(
         update(TimeSlot)
-        .where(TimeSlot.id == booking.slot_id, TimeSlot.status == "booked")
+        .where(TimeSlot.id == slot_id, TimeSlot.status == "booked")
+        .values(status="free")
+    )
+    slot = db.get(TimeSlot, slot_id, populate_existing=True)
+    notification_service.add_notification(
+        db,
+        user_id,
+        "cancellation",
+        notification_service.describe_slot(db.get(Facility, slot.facility_id), slot),
+    )
+    db.commit()
+
+
+def reschedule_booking(
+    db: Session, user_id: int, booking_id: int, new_slot_id: int
+) -> Booking:
+    """Mută o rezervare confirmată pe alt interval liber din aceeași sală.
+
+    Rezervarea veche trebuie să se mai poată anula (24 de ore), iar intervalul
+    nou respectă regulile de la creare. Totul se face într-o tranzacție:
+    intervalul nou devine ocupat, cel vechi liber, iar rezervarea rămâne
+    aceeași (același id), cu alt interval.
+
+    Ridică BookingNotFoundError, BookingAlreadyCancelledError,
+    CancellationTooLateError, SameSlotError, SlotNotFoundError,
+    OtherFacilitySlotError, FacilityNotBookableError, SlotAlreadyStartedError,
+    OverlappingBookingError sau SlotNotAvailableError.
+    """
+    # Aceleași verificări ca la anulare: reprogramarea e o anulare urmată de
+    # o rezervare nouă, deci are aceeași regulă de 24 de ore.
+    if not 1 <= booking_id <= facility_service.MAX_DB_ID:
+        raise BookingNotFoundError()
+    booking = db.get(Booking, booking_id)
+    if booking is None or booking.user_id != user_id:
+        raise BookingNotFoundError()
+    if booking.status == "cancelled":
+        raise BookingAlreadyCancelledError()
+    old_slot = booking.slot
+    if not can_be_cancelled(old_slot, facility_service.romania_now(db)):
+        raise CancellationTooLateError()
+
+    if new_slot_id == old_slot.id:
+        raise SameSlotError()
+    new_slot = db.get(TimeSlot, new_slot_id)
+    if new_slot is None:
+        raise SlotNotFoundError()
+    if new_slot.facility_id != old_slot.facility_id:
+        raise OtherFacilitySlotError()
+    facility = db.get(Facility, new_slot.facility_id)
+    if facility.status != "active":
+        raise FacilityNotBookableError()
+    if has_started(db, new_slot):
+        raise SlotAlreadyStartedError()
+
+    # Ca la creare: rândul utilizatorului blocat, ca două cereri ale aceluiași
+    # cont să se verifice pe rând. Numărul de rezervări active nu se schimbă
+    # (mutăm una existentă), deci maximul nu se mai verifică.
+    db.execute(select(User.id).where(User.id == user_id).with_for_update())
+    if has_overlapping_booking(db, user_id, new_slot, ignored_booking_id=booking.id):
+        db.rollback()
+        raise OverlappingBookingError()
+
+    # Ocupăm intervalul nou doar dacă e încă liber (cereri simultane).
+    taken = db.execute(
+        update(TimeSlot)
+        .where(TimeSlot.id == new_slot.id, TimeSlot.status == "free")
+        .values(status="booked")
+    )
+    if taken.rowcount == 0:
+        db.rollback()
+        raise SlotNotAvailableError()
+
+    # Mutăm rezervarea doar dacă e încă confirmată și tot pe intervalul vechi:
+    # o anulare sau o altă reprogramare trimisă în același timp o oprește.
+    moved = db.execute(
+        update(Booking)
+        .where(
+            Booking.id == booking.id,
+            Booking.status == "confirmed",
+            Booking.slot_id == old_slot.id,
+        )
+        .values(slot_id=new_slot.id)
+    )
+    if moved.rowcount == 0:
+        db.rollback()
+        raise BookingAlreadyCancelledError()
+
+    # Intervalul vechi redevine liber (unul blocat pentru mentenanță rămâne).
+    db.execute(
+        update(TimeSlot)
+        .where(TimeSlot.id == old_slot.id, TimeSlot.status == "booked")
         .values(status="free")
     )
     notification_service.add_notification(
         db,
         user_id,
-        "cancellation",
-        notification_service.describe_slot(
-            db.get(Facility, booking.slot.facility_id), booking.slot
-        ),
+        "reschedule",
+        notification_service.describe_slot(facility, old_slot)
+        + " → "
+        + notification_service.describe_slot(facility, new_slot),
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as error:
+        # A doua protecție: indexul unic permite o singură rezervare
+        # confirmată pe interval.
+        db.rollback()
+        raise SlotNotAvailableError() from error
+    db.refresh(booking)
+    return booking
