@@ -123,6 +123,18 @@ pytest
 ```
 La fiecare pull request, testele rulează automat pe GitHub (`.github/workflows/teste.yml`).
 
+### Testele end-to-end (cu frontend-ul)
+
+Testele end-to-end sunt în repository-ul frontend-ului (`npm run test:e2e`) și
+parcurg aplicația completă într-un browser. Ele pornesc singure backend-ul cu
+`scripts/e2e_server.py`, care:
+- golește baza de test (`TEST_DATABASE_URL`) și o reîncarcă din `shemas.sql` și
+  `seed.sql`, ca fiecare rulare să pornească de la aceleași date;
+- pornește serverul pe portul **8001**, separat de cel de dezvoltare (8000).
+
+Din backend trebuie doar mediul virtual (`.venv`) și `.env` cu `TEST_DATABASE_URL`,
+ca mai sus. Pașii pentru rulare sunt în README-ul frontend-ului.
+
 ## Stilul codului
 
 Codul respectă PEP 8, verificat cu [Ruff](https://docs.astral.sh/ruff/) (regulile sunt în `pyproject.toml`).
