@@ -1,15 +1,40 @@
 """Endpoint-urile API pentru administrarea utilizatorilor (/utilizatori)."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_admin
 from app.database import get_db
 from app.models.user import User
-from app.schemas.user import RoleUpdate, UserRead
+from app.schemas.user import RoleUpdate, UserAdminRead, UserFilters, UserRead
 from app.services import user_service
 
 router = APIRouter(prefix="/utilizatori", tags=["Utilizatori"])
+
+
+@router.get("", response_model=list[UserAdminRead])
+def list_users(
+    filters: Annotated[UserFilters, Query()],
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[UserAdminRead]:
+    """Lista utilizatorilor (administrator), cu filtrele `rol` și `cautare`.
+
+    Managerii au și `facilitati_alocate`, ca pagina administratorului să
+    arate ce săli are fiecare.
+    """
+    users = user_service.list_users(db, filters)
+    managers = [user.id for user in users if user.role == "manager"]
+    assigned = user_service.assigned_facilities_by_manager(db, managers)
+    return [
+        UserAdminRead(
+            **UserRead.from_model(user).model_dump(),
+            assigned_facility_ids=assigned.get(user.id, []),
+        )
+        for user in users
+    ]
 
 
 @router.put("/{user_id}/rol", response_model=UserRead)

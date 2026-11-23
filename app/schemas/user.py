@@ -101,6 +101,31 @@ class UserRead(BaseModel):
         )
 
 
+class UserAdminRead(UserRead):
+    """Un utilizator din lista administratorului, cu sălile alocate managerilor."""
+
+    # Pentru alt rol decât manager, lista e goală.
+    assigned_facility_ids: list[int] = Field(alias="facilitati_alocate")
+
+
+class UserFilters(BaseModel):
+    """Filtrele pentru `GET /utilizatori`, primite în adresă (query)."""
+
+    model_config = ConfigDict(
+        validate_by_name=True, validate_by_alias=True, str_strip_whitespace=True
+    )
+
+    role: UserRole | None = Field(default=None, alias="rol")
+    # Caută în nume și în email; un text gol înseamnă „fără filtru”.
+    search: str | None = Field(default=None, alias="cautare", max_length=100)
+
+    @field_validator("search")
+    @classmethod
+    def empty_search_to_none(cls, value: str | None) -> str | None:
+        """Un text gol sau doar din spații nu filtrează nimic."""
+        return value or None
+
+
 class RoleUpdate(BaseModel):
     """Datele primite la `PUT /utilizatori/{id}/rol` (doar administrator)."""
 
