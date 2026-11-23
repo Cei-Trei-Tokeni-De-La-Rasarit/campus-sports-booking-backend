@@ -12,7 +12,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import engine
-from app.routers import auth, booking_router, facility_router, notification_router
+from app.routers import (
+    auth,
+    booking_router,
+    facility_router,
+    notification_router,
+    user_router,
+)
 from app.validation_messages import describe_errors
 
 logger = logging.getLogger(__name__)
@@ -32,6 +38,7 @@ app.add_middleware(
 app.include_router(facility_router.router)
 app.include_router(auth.router)
 app.include_router(auth.users_router)
+app.include_router(user_router.router)
 app.include_router(booking_router.router)
 app.include_router(notification_router.router)
 

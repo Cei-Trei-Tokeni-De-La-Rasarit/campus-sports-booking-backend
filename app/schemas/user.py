@@ -9,9 +9,11 @@ from pydantic import (
     Field,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 from app.models.user import User
+from app.schemas.booking import MAX_DB_ID
 
 UserRole = Literal["client", "manager", "administrator"]
 
@@ -20,6 +22,10 @@ ROLE_FROM_DB: dict[str, str] = {
     "manager": "manager",
     "administrator": "administrator",
 }
+ROLE_TO_DB: dict[str, str] = {api: db for db, api in ROLE_FROM_DB.items()}
+
+# strict=True: id-urile se dau ca numere întregi, nu "1", 1.0 sau true.
+FacilityId = Annotated[int, Field(strict=True, ge=1, le=MAX_DB_ID)]
 
 ALLOWED_EMAIL_DOMAINS = ("student.usv.ro", "usv.ro")
 MAX_PASSWORD_BYTES = 72
@@ -93,6 +99,30 @@ class UserRead(BaseModel):
             role=ROLE_FROM_DB[user.role],
             email_notifications=user.email_notifications,
         )
+
+
+class RoleUpdate(BaseModel):
+    """Datele primite la `PUT /utilizatori/{id}/rol` (doar administrator)."""
+
+    model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
+
+    role: UserRole = Field(alias="rol")
+    # Doar pentru rolul manager. Lipsă înseamnă că managerul nu are facilități.
+    assigned_facility_ids: list[FacilityId] | None = Field(
+        default=None, alias="facilitati_alocate"
+    )
+
+    @model_validator(mode="after")
+    def check_assigned_facilities(self) -> "RoleUpdate":
+        """Facilitățile se alocă doar managerilor și fiecare apare o singură dată."""
+        ids = self.assigned_facility_ids
+        if ids is None:
+            return self
+        if self.role != "manager":
+            raise ValueError("Facilitățile se pot aloca doar pentru rolul manager.")
+        if len(ids) != len(set(ids)):
+            raise ValueError("Fiecare facilitate poate apărea o singură dată.")
+        return self
 
 
 class UserLogin(BaseModel):
