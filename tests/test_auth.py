@@ -8,8 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app.core import security
 from app.core.security import ALGORITHM, SECRET_KEY
 from app.database import engine
+from app.services import auth_service
 
 URL = "/auth/inregistrare"
 ACCOUNT = {
@@ -355,3 +357,59 @@ def test_deleted_user_cannot_use_existing_token(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+
+
+# Reparațiile din KAN-109.
+
+
+def test_login_with_invalid_hash_in_database_returns_401(client: TestClient) -> None:
+    register(client)
+    with engine.begin() as connection:
+        connection.execute(
+            text('UPDATE "user" SET password_hash = :hash WHERE email = :email'),
+            {"hash": "nu-este-un-hash-bcrypt", "email": ACCOUNT["email"]},
+        )
+
+    response = login(client)
+
+    assert response.status_code == 401
+
+
+def test_verify_password_with_invalid_hash_returns_false() -> None:
+    assert security.verify_password("parola-sigura", "nu-este-un-hash") is False
+    assert security.verify_password("parola-sigura", "") is False
+
+
+def test_login_with_unknown_email_still_checks_a_password(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checked: list[str] = []
+    real_verify = auth_service.verify_password
+
+    def spy(password: str, password_hash: str) -> bool:
+        checked.append(password_hash)
+        return real_verify(password, password_hash)
+
+    monkeypatch.setattr(auth_service, "verify_password", spy)
+
+    response = login(client, email="nu-exista@student.usv.ro")
+
+    assert response.status_code == 401
+    assert checked == [security.DUMMY_PASSWORD_HASH]
+
+
+def test_dummy_hash_is_a_real_bcrypt_hash() -> None:
+    # Un hash invalid ar face verificarea instantanee și ar strica scopul ei.
+    assert bcrypt.checkpw(
+        b"parola-care-nu-exista", security.DUMMY_PASSWORD_HASH.encode()
+    )
+
+
+@pytest.mark.parametrize("secret_key", [None, "", "a" * 31])
+def test_short_or_missing_secret_key_stops_the_server(secret_key: str | None) -> None:
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        security.check_secret_key(secret_key)
+
+
+def test_secret_key_of_32_characters_is_accepted() -> None:
+    assert security.check_secret_key("a" * 32) == "a" * 32

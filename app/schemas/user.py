@@ -131,7 +131,7 @@ class UserLogin(BaseModel):
     model_config = ConfigDict(validate_by_name=True, validate_by_alias=True)
 
     email: EmailStr = Field(alias="email")
-    password: str = Field(alias="parola", min_length=8, max_length=72)
+    password: str = Field(alias="parola", min_length=8, max_length=MAX_PASSWORD_BYTES)
 
     @field_validator("password")
     @classmethod

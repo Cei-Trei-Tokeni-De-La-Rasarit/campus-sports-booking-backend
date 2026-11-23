@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password, verify_password
+from app.core.security import DUMMY_PASSWORD_HASH, hash_password, verify_password
 from app.models.user import User
 from app.schemas.user import UserRegister
 
@@ -56,6 +56,11 @@ def register_user(db: Session, data: UserRegister) -> User:
 def authenticate_user(db: Session, email: str, password: str) -> User:
     """Verifică credențialele și întoarce utilizatorul dacă sunt valide."""
     user = get_user_by_email(db, email)
-    if user is None or not verify_password(password, user.password_hash):
+    if user is None:
+        # Verificăm oricum o parolă, ca un email inexistent să răspundă la fel
+        # de încet ca o parolă greșită (vezi DUMMY_PASSWORD_HASH).
+        verify_password(password, DUMMY_PASSWORD_HASH)
+        raise InvalidCredentialsError()
+    if not verify_password(password, user.password_hash):
         raise InvalidCredentialsError()
     return user
