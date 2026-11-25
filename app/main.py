@@ -19,6 +19,7 @@ from app.routers import (
     notification_router,
     user_router,
 )
+from app.security_headers import SecurityHeadersMiddleware
 
 # Importat la pornire, ca o configurație de email greșită (EMAIL_MODE=smtp fără
 # datele contului) să oprească serverul imediat, nu abia la primul email.
@@ -42,6 +43,9 @@ app.add_middleware(
     # Authorization: frontend-ul trimite token-ul JWT (Bearer) în acest header.
     allow_headers=["Content-Type", "Authorization"],
 )
+# Adăugat ultimul, deci cel mai din exterior: antetele de securitate ajung pe
+# toate răspunsurile, inclusiv pe cele de CORS și pe erori (KAN-126).
+app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(facility_router.router)
 app.include_router(auth.router)
 app.include_router(auth.users_router)
