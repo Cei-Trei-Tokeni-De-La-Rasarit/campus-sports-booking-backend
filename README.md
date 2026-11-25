@@ -130,6 +130,18 @@ Dacă lipsește o variabilă, serverul nu pornește și spune care. Parola de ap
 doar în `.env`; nu o pune în cod, pe GitHub sau în chat. Testele nu trimit niciodată
 emailuri reale, oricare ar fi `EMAIL_MODE`.
 
+## Antetele de securitate
+
+Fiecare răspuns al API-ului are antetele de securitate (`app/security_headers.py`):
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`
+și un `Content-Security-Policy` strict (`default-src 'none'`). Paginile de documentație
+(`/docs`, `/redoc`) primesc un CSP separat, care permite scripturile Swagger și ReDoc de pe
+`cdn.jsdelivr.net`.
+
+La publicarea aplicației, aceleași antete (plus `Strict-Transport-Security`, când e HTTPS)
+se adaugă și în serverul care livrează frontend-ul (de exemplu, nginx sau setările
+hosting-ului), pentru că backend-ul nu controlează paginile frontend-ului.
+
 ## Teste
 
 Testele (pytest) folosesc o bază separată, golită la fiecare test, ca să nu atingă
