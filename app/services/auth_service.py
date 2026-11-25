@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.security import DUMMY_PASSWORD_HASH, hash_password, verify_password
 from app.models.user import User
 from app.schemas.user import UserRegister
+from app.services import login_limit_service
 
 
 class EmailAlreadyExistsError(Exception):
@@ -54,13 +55,25 @@ def register_user(db: Session, data: UserRegister) -> User:
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User:
-    """Verifică credențialele și întoarce utilizatorul dacă sunt valide."""
+    """Verifică credențialele și întoarce utilizatorul dacă sunt valide.
+
+    Ridică TooManyAttemptsError dacă emailul are prea multe încercări greșite
+    (KAN-127) sau InvalidCredentialsError dacă emailul sau parola sunt greșite.
+    """
+    email = email.lower().strip()
+    login_limit_service.lock_email(db, email)
+    now = login_limit_service.database_now(db)
+    login_limit_service.check_not_blocked(db, email, now)
+
     user = get_user_by_email(db, email)
     if user is None:
         # Verificăm oricum o parolă, ca un email inexistent să răspundă la fel
         # de încet ca o parolă greșită (vezi DUMMY_PASSWORD_HASH).
         verify_password(password, DUMMY_PASSWORD_HASH)
+        login_limit_service.record_failure(db, email, now)
         raise InvalidCredentialsError()
     if not verify_password(password, user.password_hash):
+        login_limit_service.record_failure(db, email, now)
         raise InvalidCredentialsError()
+    login_limit_service.clear_failures(db, email)
     return user
