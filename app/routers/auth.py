@@ -17,7 +17,7 @@ from app.schemas.user import (
     UserRead,
     UserRegister,
 )
-from app.services import auth_service, password_reset_service
+from app.services import auth_service, login_limit_service, password_reset_service
 
 router = APIRouter(prefix="/auth", tags=["Utilizatori"])
 users_router = APIRouter(prefix="/utilizatori", tags=["Utilizatori"])
@@ -78,6 +78,13 @@ def sign_in(data: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
     """Autentifică utilizatorul și returnează token-ul JWT."""
     try:
         user = auth_service.authenticate_user(db, data.email, data.password)
+    except login_limit_service.TooManyAttemptsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Prea multe încercări. Încearcă din nou peste câteva minute.",
+            # Antetul standard: câte secunde mai trebuie așteptat.
+            headers={"Retry-After": str(error.retry_after)},
+        ) from error
     except auth_service.InvalidCredentialsError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

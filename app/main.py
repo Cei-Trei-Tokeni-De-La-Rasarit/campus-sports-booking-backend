@@ -52,8 +52,15 @@ app.include_router(notification_router.router)
 
 @app.exception_handler(StarletteHTTPException)
 def handle_http_error(_request: Request, error: StarletteHTTPException) -> JSONResponse:
-    """Trimite erorile în formatul din specificație: {"mesaj": "..."}."""
-    return JSONResponse(status_code=error.status_code, content={"mesaj": error.detail})
+    """Trimite erorile în formatul din specificație: {"mesaj": "..."}.
+
+    Antetele erorii (de exemplu, `Retry-After` la 429) ajung și ele la client.
+    """
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"mesaj": error.detail},
+        headers=getattr(error, "headers", None),
+    )
 
 
 @app.exception_handler(RequestValidationError)

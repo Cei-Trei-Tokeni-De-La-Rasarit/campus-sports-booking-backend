@@ -129,3 +129,13 @@ CREATE TABLE password_reset_token (
     CHECK (expires_at > created_at)
 );
 CREATE INDEX ix_password_reset_token_user ON password_reset_token (user_id, created_at);
+
+-- 13. login_attempt (încercările de autentificare eșuate, KAN-127)
+--     După email, nu după utilizator: limita se aplică la fel și adreselor
+--     fără cont, ca răspunsul să nu arate ce conturi există.
+CREATE TABLE login_attempt (
+    id          INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email       VARCHAR(150) NOT NULL,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_login_attempt_email ON login_attempt (email, created_at);
